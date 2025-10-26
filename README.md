@@ -80,22 +80,32 @@ Channels (Web/Mobile/Apps)
 - **Configuration**: Multi-tenant configuration management with provider settings
 - **Business Process Orchestration**: Coordinating domain services to fulfill business operations
 
-### Architecture Complete – Controller-Based Context Resolution!
+### Architecture Complete – Controller-Based Context Resolution + Security Center Integration! 🎉
 
-This library provides a **fully integrated, controller-based** application layer:
+This library provides a **fully integrated, controller-based** application layer with **complete Security Center integration**:
+
+#### 🔒 Security Center Integration - COMPLETE
+- ✅ **FireflySessionManager Integration** – Fully integrated for session management, roles, and permissions
+- ✅ **Automatic Role Resolution** – Roles extracted from party contracts via Security Center
+- ✅ **Automatic Permission Resolution** – Permissions derived from role scopes (action + resource)
+- ✅ **Product Access Validation** – Validates party has access to requested products/contracts
+- ✅ **SessionContextMapper Utility** – Maps session data to AppContext roles/permissions
+- ✅ **Graceful Degradation** – Works even if Security Center is temporarily unavailable
+
+#### 🎯 Core Features
 - ✅ **@FireflyApplication** annotation for application metadata and service discovery
 - ✅ **Context Architecture** (AppContext, AppConfig, AppSecurityContext, ApplicationExecutionContext)
 - ✅ **@Secure Annotation** system for declarative security
-- ✅ **🎯 Two Base Controllers** – `AbstractApplicationController`, `AbstractResourceController`
-- ✅ **🎯 Automatic Context Resolution** – Party/Tenant from Istio headers + Contract/Product from path variables
-- ✅ **🎯 Default Config Resolver** – Fetches tenant configuration automatically
-- ✅ **🎯 Default Security Authorization** – Validates roles/permissions automatically
+- ✅ **Two Base Controllers** – `AbstractApplicationController`, `AbstractResourceController`
+- ✅ **Automatic Context Resolution** – Party/Tenant from Istio headers + Contract/Product from path variables
+- ✅ **Default Config Resolver** – Fetches tenant configuration automatically
+- ✅ **Default Security Authorization** – Validates roles/permissions automatically
 - ✅ **Abstract Application Service** base class for business orchestration
 - ✅ **AOP Interceptors** for annotation processing
 - ✅ **Spring Boot Auto-configuration**
 - ✅ **Actuator Integration** with application metadata exposed in /actuator/info
 
-**✨ Extend the appropriate controller base class and call `resolveExecutionContext()` – full context resolution is automatic!**
+**✨ Extend the appropriate controller base class and call `resolveExecutionContext()` – full context resolution with Security Center integration is automatic!**
 
 ### 🏗️ Infrastructure Components Included
 
@@ -546,31 +556,50 @@ The library provides clear integration points (marked with TODO) for:
 - Retrieve feature flags
 - Manage tenant-specific settings
 
-### 2. FireflySessionManager (Security Center) ⭐⭐⭐
+### 2. FireflySessionManager (Security Center) ✅ **INTEGRATED**
 **Purpose:** Authorization, session management, role/permission resolution
-- **Party Session:** Track which contracts a party has access to
-- **Contract Access:** Validate if party can access specific contract/product
-- **Role Resolution:** Get party roles in contract (owner, viewer, etc.)
-- **Role Scopes:** Support party-level, contract-level, product-level roles
-- **Permission Derivation:** Convert roles to permissions using role mappings
-- **Session Caching:** Cache party sessions for performance
 
-**Example Flow:**
+**Status:** ✅ **Fully integrated and operational**
+
+**Integration Points:**
+- ✅ `DefaultContextResolver` - Automatically resolves roles and permissions from session
+- ✅ `DefaultSecurityAuthorizationService` - Validates product access and permissions
+- ✅ `SessionContextMapper` - Utility for extracting roles/permissions from session data
+- ✅ Graceful degradation when Security Center is unavailable
+
+**Key Features:**
+- **Party Session Management:** Tracks which contracts a party has access to
+- **Contract Access Validation:** Validates if party can access specific contract/product
+- **Role Resolution:** Gets party roles in contract (owner, viewer, etc.)
+- **Role Scopes:** Supports party-level, contract-level, product-level roles
+- **Permission Derivation:** Converts roles to permissions using role scopes
+- **Session Caching:** Caches party sessions for performance (via Redis/Caffeine)
+
+**How It Works:**
 ```java
-// 1. Get party session
-PartySession session = sessionManager.getPartySession(partyId, tenantId);
+// 1. FireflySessionManager called automatically by DefaultContextResolver
+sessionManager.createOrGetSession(exchange)
+    .map(session -> {
+        // 2. Extract roles based on context (party/contract/product)
+        Set<String> roles = SessionContextMapper.extractRoles(
+            session, contractId, productId
+        );
+        
+        // 3. Extract permissions from role scopes
+        Set<String> permissions = SessionContextMapper.extractPermissions(
+            session, contractId, productId
+        );
+        
+        return AppContext with roles and permissions;
+    });
 
-// 2. Check contract access
-boolean hasAccess = session.hasContractAccess(contractId);
-
-// 3. Get roles for contract
-Set<String> roles = session.getContractRoles(contractId, productId);
-// Returns: ["owner", "account:viewer", "transaction:creator"]
-
-// 4. Derive permissions
-Set<String> permissions = session.getPermissionsForRoles(roles);
-// Returns: ["account:read", "account:update", "transaction:create"]
+// 4. Authorization checks product access automatically
+sessionManager.hasAccessToProduct(partyId, productId); // ✅
+sessionManager.hasPermission(partyId, productId, "READ", "BALANCE"); // ✅
 ```
+
+**Permission Format:** `{roleCode}:{actionType}:{resourceType}`
+- Example: `owner:READ:BALANCE`, `account_viewer:READ:TRANSACTION`
 
 ### 3. Product Management (`common-platform-product-mgmt-sdk`) (Optional)
 **Purpose:** Product-specific information and configuration
