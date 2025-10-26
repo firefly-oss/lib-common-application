@@ -18,8 +18,6 @@ package com.firefly.common.application.resolver;
 
 import com.firefly.common.application.context.AppContext;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.context.ReactiveSecurityContextHolder;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -34,8 +32,7 @@ import java.util.UUID;
  * 
  * <p>This resolver automatically:</p>
  * <ul>
- *   <li>Extracts party/tenant/contract/product IDs from JWT tokens</li>
- *   <li>Falls back to HTTP headers if JWT claims are not present</li>
+ *   <li>Extracts party/tenant/contract/product IDs from HTTP headers (injected by Istio)</li>
  *   <li>Enriches context with roles and permissions from platform SDKs</li>
  *   <li>Caches results for performance</li>
  * </ul>
@@ -43,23 +40,16 @@ import java.util.UUID;
  * <h2>What Microservices Need to Do</h2>
  * <p><strong>Nothing.</strong> This works automatically once you add the library dependency.</p>
  * 
- * <h2>JWT Token Expected Claims</h2>
- * <pre>
- * {
- *   "sub": "party-uuid",           // Maps to partyId
- *   "tenantId": "tenant-uuid",     // Maps to tenantId
- *   "contractId": "contract-uuid", // Optional
- *   "productId": "product-uuid"    // Optional
- * }
- * </pre>
- * 
- * <h2>HTTP Header Fallbacks</h2>
+ * <h2>Expected HTTP Headers (Injected by Istio)</h2>
  * <ul>
- *   <li><code>X-Party-Id</code> - Party UUID</li>
- *   <li><code>X-Tenant-Id</code> - Tenant UUID</li>
- *   <li><code>X-Contract-Id</code> - Contract UUID (optional)</li>
- *   <li><code>X-Product-Id</code> - Product UUID (optional)</li>
+ *   <li><code>X-Party-Id</code> - Party UUID (required)</li>
+ *   <li><code>X-Tenant-Id</code> - Tenant UUID (required)</li>
+ *   <li><code>X-Contract-Id</code> - Contract UUID (optional, from path variable or header)</li>
+ *   <li><code>X-Product-Id</code> - Product UUID (optional, from path variable or header)</li>
  * </ul>
+ * 
+ * <p><strong>Note:</strong> Istio service mesh automatically injects X-Party-Id and X-Tenant-Id headers
+ * based on authentication. Microservices don't need to handle authentication - it's done at the gateway.</p>
  * 
  * @author Firefly Development Team
  * @since 1.0.0
@@ -75,71 +65,31 @@ public class DefaultContextResolver extends AbstractContextResolver {
     
     @Override
     public Mono<UUID> resolvePartyId(ServerWebExchange exchange) {
-        log.debug("Resolving party ID from request");
+        log.debug("Resolving party ID from Istio-injected header");
         
-        return ReactiveSecurityContextHolder.getContext()
-                .map(securityContext -> securityContext.getAuthentication())
-                .filter(auth -> auth.getPrincipal() instanceof Jwt)
-                .map(auth -> (Jwt) auth.getPrincipal())
-                .flatMap(jwt -> {
-                    // Try "sub" claim first (standard JWT subject)
-                    String subject = jwt.getSubject();
-                    if (subject != null && !subject.isEmpty()) {
-                        try {
-                            return Mono.just(UUID.fromString(subject));
-                        } catch (IllegalArgumentException e) {
-                            log.debug("JWT subject is not a valid UUID: {}", subject);
-                        }
-                    }
-                    
-                    // Try explicit "partyId" claim
-                    String partyId = jwt.getClaimAsString("partyId");
-                    if (partyId != null && !partyId.isEmpty()) {
-                        try {
-                            return Mono.just(UUID.fromString(partyId));
-                        } catch (IllegalArgumentException e) {
-                            log.debug("JWT partyId claim is not a valid UUID: {}", partyId);
-                        }
-                    }
-                    
-                    return Mono.empty();
-                })
-                // Fallback to header
-                .switchIfEmpty(extractUUID(exchange, "partyId", "X-Party-Id"))
-                .doOnNext(id -> log.debug("Resolved party ID: {}", id))
-                .doOnError(error -> log.error("Failed to resolve party ID", error));
+        // Party ID is injected by Istio as X-Party-Id header
+        return extractUUID(exchange, "partyId", "X-Party-Id")
+                .doOnNext(id -> log.debug("Resolved party ID from Istio header: {}", id))
+                .switchIfEmpty(Mono.error(new IllegalStateException(
+                    "X-Party-Id header not found. Ensure request passes through Istio gateway.")));
     }
     
     @Override
     public Mono<UUID> resolveTenantId(ServerWebExchange exchange) {
-        log.debug("Resolving tenant ID from request");
+        log.debug("Resolving tenant ID from Istio-injected header");
         
-        return ReactiveSecurityContextHolder.getContext()
-                .map(securityContext -> securityContext.getAuthentication())
-                .filter(auth -> auth.getPrincipal() instanceof Jwt)
-                .map(auth -> (Jwt) auth.getPrincipal())
-                .flatMap(jwt -> {
-                    String tenantId = jwt.getClaimAsString("tenantId");
-                    if (tenantId != null && !tenantId.isEmpty()) {
-                        try {
-                            return Mono.just(UUID.fromString(tenantId));
-                        } catch (IllegalArgumentException e) {
-                            log.debug("JWT tenantId claim is not a valid UUID: {}", tenantId);
-                        }
-                    }
-                    return Mono.empty();
-                })
-                // Fallback to header
-                .switchIfEmpty(extractUUID(exchange, "tenantId", "X-Tenant-Id"))
-                .doOnNext(id -> log.debug("Resolved tenant ID: {}", id))
-                .doOnError(error -> log.error("Failed to resolve tenant ID", error));
+        // Tenant ID is injected by Istio as X-Tenant-Id header
+        return extractUUID(exchange, "tenantId", "X-Tenant-Id")
+                .doOnNext(id -> log.debug("Resolved tenant ID from Istio header: {}", id))
+                .switchIfEmpty(Mono.error(new IllegalStateException(
+                    "X-Tenant-Id header not found. Ensure request passes through Istio gateway.")));
     }
     
     @Override
     public Mono<UUID> resolveContractId(ServerWebExchange exchange) {
-        log.debug("Resolving contract ID from request");
+        log.debug("Resolving contract ID from path variable or header");
         
-        // Contract ID is typically in path variable or header, not JWT
+        // Contract ID comes from path variable (e.g., /contracts/{contractId}/...) or header
         return extractUUIDFromPath(exchange, "contractId")
                 .switchIfEmpty(extractUUID(exchange, "contractId", "X-Contract-Id"))
                 .doOnNext(id -> log.debug("Resolved contract ID: {}", id));
@@ -147,9 +97,9 @@ public class DefaultContextResolver extends AbstractContextResolver {
     
     @Override
     public Mono<UUID> resolveProductId(ServerWebExchange exchange) {
-        log.debug("Resolving product ID from request");
+        log.debug("Resolving product ID from path variable or header");
         
-        // Product ID is typically in path variable or header, not JWT
+        // Product ID comes from path variable (e.g., /products/{productId}/...) or header
         return extractUUIDFromPath(exchange, "productId")
                 .switchIfEmpty(extractUUID(exchange, "productId", "X-Product-Id"))
                 .doOnNext(id -> log.debug("Resolved product ID: {}", id));
