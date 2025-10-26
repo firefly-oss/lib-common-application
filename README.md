@@ -151,9 +151,10 @@ ApplicationExecutionContext {
 **AppSecurityContext** - Security requirements and authorization results
 
 All TODO placeholders are marked for SDK integration with:
-- common-platform-customer-mgmt-sdk (party information, roles)
-- common-platform-contract-mgmt-sdk (contract information, permissions)
-- common-platform-config-mgmt-sdk (tenant configuration, providers)
+- `common-platform-customer-mgmt-sdk` - Party information, roles
+- `common-platform-contract-mgmt-sdk` - Contract information, permissions
+- `common-platform-product-mgmt-sdk` - Product information, product-specific config
+- `common-platform-config-mgmt-sdk` - Tenant configuration, providers, feature flags
 
 See the comprehensive architecture documentation below.
 
@@ -192,29 +193,199 @@ public class MyServiceApplication {
 
 ### 3. Implement Required Components
 
+The library provides **abstract base classes** that you must extend in your microservice. Each abstracts focuses on a specific responsibility:
+
+#### AbstractContextResolver - Extract Request Information
+
+**Purpose:** Extract party/tenant/contract/product IDs from the HTTP request.
+
+**You must implement:**
+- `resolvePartyId(ServerWebExchange)` - Extract from JWT, header, or session
+- `resolveTenantId(ServerWebExchange)` - Extract from JWT, header, or subdomain
+- `resolveContractId(ServerWebExchange)` - Extract from path variable or header (optional)
+- `resolveProductId(ServerWebExchange)` - Extract from path variable or header (optional)
+
+**You should override (optional):**
+- `resolveRoles(AppContext, ServerWebExchange)` - Call `customer-mgmt-sdk` to get party roles
+- `resolvePermissions(AppContext, ServerWebExchange)` - Call `contract-mgmt-sdk` to get permissions
+
 ```java
-// 1. Context Resolver
 @Component
-public class MyContextResolver extends AbstractContextResolver {
-    // Implement resolvePartyId, resolveTenantId, etc.
+public class CustomContextResolver extends AbstractContextResolver {
+    
+    @Override
+    public Mono<UUID> resolvePartyId(ServerWebExchange exchange) {
+        // Extract from JWT, header, or your auth mechanism
+        return extractUUID(exchange, "partyId", "X-Party-Id");
+    }
+    
+    @Override
+    public Mono<UUID> resolveTenantId(ServerWebExchange exchange) {
+        // Extract from JWT, header, or subdomain
+        return extractUUID(exchange, "tenantId", "X-Tenant-Id");
+    }
+    
+    @Override
+    public Mono<UUID> resolveContractId(ServerWebExchange exchange) {
+        // Extract from path variable or header (if applicable)
+        return extractUUIDFromPath(exchange, "contractId")
+            .switchIfEmpty(extractUUID(exchange, "contractId", "X-Contract-Id"));
+    }
+    
+    @Override
+    public Mono<UUID> resolveProductId(ServerWebExchange exchange) {
+        // Extract from path variable or header (if applicable)
+        return extractUUIDFromPath(exchange, "productId")
+            .switchIfEmpty(extractUUID(exchange, "productId", "X-Product-Id"));
+    }
+    
+    // Optional: Enrich with roles from platform service
+    @Override
+    protected Mono<Set<String>> resolveRoles(AppContext context, ServerWebExchange exchange) {
+        // TODO: Call common-platform-customer-mgmt-sdk
+        // return customerMgmtClient.getPartyRoles(context.getPartyId(), context.getContractId());
+        return Mono.just(Set.of()); // Return empty set until SDK is integrated
+    }
+    
+    // Optional: Enrich with permissions from platform service
+    @Override
+    protected Mono<Set<String>> resolvePermissions(AppContext context, ServerWebExchange exchange) {
+        // TODO: Call common-platform-contract-mgmt-sdk
+        // return contractMgmtClient.getPartyPermissions(context.getPartyId(), context.getContractId());
+        return Mono.just(Set.of()); // Return empty set until SDK is integrated
+    }
 }
+```
 
-// 2. Config Resolver  
+---
+
+#### AbstractConfigResolver - Fetch Tenant Configuration
+
+**Purpose:** Load tenant-specific configuration (providers, feature flags, settings).
+
+**You must implement:**
+- `fetchConfigFromPlatform(UUID tenantId)` - Fetch config from your config service
+
+```java
 @Component
-public class MyConfigResolver extends AbstractConfigResolver {
-    // Override fetchConfigFromPlatform()
+public class CustomConfigResolver extends AbstractConfigResolver {
+    
+    // TODO: Inject your config management SDK
+    // private final ConfigManagementClient configClient;
+    
+    @Override
+    protected Mono<AppConfig> fetchConfigFromPlatform(UUID tenantId) {
+        // TODO: Call common-platform-config-mgmt-sdk
+        /*
+        return configClient.getTenantConfig(tenantId)
+            .map(response -> AppConfig.builder()
+                .tenantId(response.getTenantId())
+                .tenantName(response.getName())
+                .providers(response.getProviders())
+                .featureFlags(response.getFeatureFlags())
+                .settings(response.getSettings())
+                .build());
+        */
+        
+        // Placeholder until SDK is integrated
+        return Mono.just(AppConfig.builder()
+            .tenantId(tenantId)
+            .build());
+    }
 }
+```
 
-// 3. Authorization Service
+---
+
+#### AbstractSecurityAuthorizationService - Authorization Decision
+
+**Purpose:** Decide if a request should be authorized based on roles/permissions.
+
+**Default behavior:** Checks if user's roles/permissions match required roles/permissions.
+
+**You can override:**
+- `authorizeWithSecurityCenter(...)` - Integrate with SecurityCenter for complex policies
+
+```java
 @Service
-public class MyAuthorizationService extends AbstractSecurityAuthorizationService {
-    // Use default implementation or override authorizeWithSecurityCenter()
+public class CustomAuthorizationService extends AbstractSecurityAuthorizationService {
+    
+    // OPTION 1: Use default role/permission matching (no code needed)
+    // Just declare the class and Spring will use the default implementation
+    
+    // OPTION 2: Integrate with SecurityCenter (optional)
+    /*
+    @Override
+    protected Mono<AppSecurityContext> authorizeWithSecurityCenter(
+            AppContext context, AppSecurityContext securityContext) {
+        return securityCenterClient.evaluate(context, securityContext);
+    }
+    */
 }
+```
 
-// 4. Application Service
+---
+
+#### AbstractApplicationService - Business Process Orchestration
+
+**Purpose:** Base class for application services that orchestrate business processes.
+
+**Provides helper methods:**
+- `resolveExecutionContext(ServerWebExchange)` - Gets full context automatically
+- `validateContext(context, requireContract, requireProduct)` - Validates required IDs
+- `requireRole(context, role)` / `requirePermission(context, permission)` - Authorization helpers
+- `getProvider(context, providerName)` - Access provider configuration
+- `isFeatureEnabled(context, featureName)` - Check feature flags
+
+```java
 @Service
-public class MyApplicationService extends AbstractApplicationService {
-    // Implement business process orchestration
+public class CustomerOnboardingService extends AbstractApplicationService {
+    
+    private final CustomerDomainService customerDomain;
+    private final KycProviderService kycProvider;
+    
+    public Mono<Customer> onboardCustomer(ServerWebExchange exchange, OnboardingRequest request) {
+        return resolveExecutionContext(exchange)
+            // Validate we have partyId and tenantId
+            .flatMap(ctx -> validateContext(ctx, false, false))
+            
+            // Check permission
+            .flatMap(ctx -> requirePermission(ctx, "CREATE_CUSTOMER")
+                .thenReturn(ctx))
+            
+            // Orchestrate business process
+            .flatMap(ctx -> 
+                kycProvider.verify(ctx, request)
+                    .flatMap(kycResult -> customerDomain.createCustomer(ctx, request, kycResult))
+            );
+    }
+}
+```
+
+---
+
+#### Optional: AbstractContractController / AbstractProductController
+
+**Purpose:** Base controllers that automatically extract contract/product IDs from path.
+
+```java
+@RestController
+@RequestMapping("/api/v1/contracts")
+public class TransferController extends AbstractContractController {
+    
+    @PostMapping("/{contractId}/transfer")
+    public Mono<Transfer> transfer(
+            @PathVariable UUID contractId,
+            @RequestBody TransferRequest request,
+            ServerWebExchange exchange) {
+        
+        // withContractContext() automatically:
+        // 1. Resolves full context
+        // 2. Sets contractId from path variable
+        // 3. Passes enriched context to your lambda
+        return withContractContext(contractId, exchange,
+            context -> transferService.execute(context, request));
+    }
 }
 ```
 
@@ -329,18 +500,26 @@ The library provides clear integration points (marked with TODO) for:
 
 ### 2. Contract Management (`common-platform-contract-mgmt-sdk`)
 - Resolve contract information
-- Fetch party permissions
+- Fetch party permissions in contract
 - Validate contract status
 
-### 3. Configuration Management (`common-platform-config-mgmt-sdk`)
-- Fetch tenant configuration
-- Get provider configurations
-- Retrieve feature flags
+### 3. Product Management (`common-platform-product-mgmt-sdk`)
+- Resolve product information
+- Fetch product-specific configuration
+- Validate product status and availability
+- Get product features and limits
 
-### 4. Security Center (Future)
+### 4. Configuration Management (`common-platform-config-mgmt-sdk`)
+- Fetch tenant configuration
+- Get provider configurations (KYC, payment gateways, etc.)
+- Retrieve feature flags
+- Manage tenant-specific settings
+
+### 5. Security Center (Future)
 - Complex authorization policies
 - Attribute-Based Access Control (ABAC)
 - Audit trail of authorization decisions
+- Policy evaluation and enforcement
 
 ## Design Principles
 
