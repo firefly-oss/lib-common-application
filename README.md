@@ -79,19 +79,22 @@ Channels (Web/Mobile/Apps)
 - **Configuration**: Multi-tenant configuration management with provider settings
 - **Business Process Orchestration**: Coordinating domain services to fulfill business operations
 
-## Architecture Complete
+## Architecture Complete – Controller-Based Context Resolution!
 
-This library provides a fully structured application layer with:
+This library provides a **fully integrated, controller-based** application layer:
 - ✅ **@FireflyApplication** annotation for application metadata and service discovery
-- ✅ **Context Architecture** (AppContext, AppConfig, AppSecurityContext)
+- ✅ **Context Architecture** (AppContext, AppConfig, AppSecurityContext, ApplicationExecutionContext)
 - ✅ **@Secure Annotation** system for declarative security
-- ✅ **Abstract Resolvers** for context and configuration
-- ✅ **Security Authorization** framework with SecurityCenter integration points
-- ✅ **Abstract Application Service** base class
+- ✅ **🎯 Three Base Controllers** – `AbstractPartyController`, `AbstractContractController`, `AbstractProductController`
+- ✅ **🎯 Automatic Context Resolution** – Party/Tenant from Istio headers + Contract/Product from path variables
+- ✅ **🎯 Default Config Resolver** – Fetches tenant configuration automatically
+- ✅ **🎯 Default Security Authorization** – Validates roles/permissions automatically
+- ✅ **Abstract Application Service** base class for business orchestration
 - ✅ **AOP Interceptors** for annotation processing
-- ✅ **Endpoint Security Registry** for explicit mappings
 - ✅ **Spring Boot Auto-configuration**
 - ✅ **Actuator Integration** with application metadata exposed in /actuator/info
+
+**✨ Extend the appropriate controller base class and call `resolveExecutionContext()` – full context resolution is automatic!**
 
 ### 🏗️ Infrastructure Components Included
 
@@ -151,10 +154,9 @@ ApplicationExecutionContext {
 **AppSecurityContext** - Security requirements and authorization results
 
 All TODO placeholders are marked for SDK integration with:
-- `common-platform-customer-mgmt-sdk` - Party information, roles
-- `common-platform-contract-mgmt-sdk` - Contract information, permissions
-- `common-platform-product-mgmt-sdk` - Product information, product-specific config
-- `common-platform-config-mgmt-sdk` - Tenant configuration, providers, feature flags
+- `common-platform-config-mgmt-sdk` - Tenant resolution (partyId → tenantId), configuration, providers, feature flags
+- `FireflySessionManager` (Security Center) - Party sessions, contract access, roles, permissions, role scopes
+- `common-platform-product-mgmt-sdk` - Product information, product-specific config (optional)
 
 See the comprehensive architecture documentation below.
 
@@ -191,92 +193,185 @@ public class MyServiceApplication {
 }
 ```
 
-### 3. Implement Required Components
+### 3. Choose Your Controller Base Class
 
-The library provides **abstract base classes** that you must extend in your microservice. Each abstracts focuses on a specific responsibility:
+**The library provides three base controller classes** that automatically resolve context based on your endpoint's scope:
 
-#### AbstractContextResolver - Extract Request Information
+#### 🎯 Architecture: How Context Resolution Works
 
-**Purpose:** Extract party/tenant/contract/product IDs from the HTTP request.
+```
+┌──────────────────────────────────────────────────┐
+│        Istio Gateway (Authentication)                  │
+│  - Validates JWT                                      │
+│  - Injects X-Party-Id header (from JWT sub)          │
+└──────────────────────┬──────────────────────────┘
+                         │
+                         ↓
+┌──────────────────────────────────────────────────┐
+│        Your Controller (Extracts Path Variables)       │
+│  - Extends AbstractPartyController                    │
+│    OR AbstractContractController                      │
+│    OR AbstractProductController                       │
+│  - Extracts contractId from @PathVariable (if needed) │
+│  - Extracts productId from @PathVariable (if needed)  │
+│  - Calls resolveExecutionContext(exchange, ...)       │
+└──────────────────────┬──────────────────────────┘
+                         │
+                         ↓
+┌──────────────────────────────────────────────────┐
+│        DefaultContextResolver (Library)                │
+│  1. Extracts partyId from X-Party-Id header          │
+│  2. Calls config-mgmt to get tenantId (by partyId)  │
+│  3. Uses contractId/productId from controller        │
+│  4. Calls FireflySessionManager (Security Center)    │
+│     - Get party session (contracts, roles, scopes)   │
+│     - Validate contract access                       │
+│     - Get roles for contract/product                 │
+│     - Derive permissions from roles                  │
+└──────────────────────────────────────────────────┘
+```
 
-**You must implement:**
-- `resolvePartyId(ServerWebExchange)` - Extract from JWT, header, or session
-- `resolveTenantId(ServerWebExchange)` - Extract from JWT, header, or subdomain
-- `resolveContractId(ServerWebExchange)` - Extract from path variable or header (optional)
-- `resolveProductId(ServerWebExchange)` - Extract from path variable or header (optional)
+**Key Points:**
+- ✅ **Istio handles authentication** → Injects `X-Party-Id` header (from JWT)
+- ✅ **Config-mgmt resolves tenant** → `GET /api/v1/parties/{partyId}/tenant`
+- ✅ **Controllers extract path variables** → `@PathVariable UUID contractId/productId`
+- ✅ **FireflySessionManager (Security Center)** → Provides party session: contracts, roles, permissions, scopes
+- ✅ **Library resolves full context** → Party + Tenant + Contract + Product + Roles + Permissions + Config
+- ✅ **@Secure / EndpointSecurityRegistry** → Validates authorization using resolved context
 
-**You should override (optional):**
-- `resolveRoles(AppContext, ServerWebExchange)` - Call `customer-mgmt-sdk` to get party roles
-- `resolvePermissions(AppContext, ServerWebExchange)` - Call `contract-mgmt-sdk` to get permissions
+#### 🎯 Option 1: Party-Only Endpoints (Onboarding, Product Catalog)
+
+Use `AbstractPartyController` for endpoints that don't require contract or product context:
 
 ```java
-@Component
-public class CustomContextResolver extends AbstractContextResolver {
+@RestController
+@RequestMapping("/api/v1/onboarding")
+public class OnboardingController extends AbstractPartyController {
     
-    @Override
-    public Mono<UUID> resolvePartyId(ServerWebExchange exchange) {
-        // Extract from JWT, header, or your auth mechanism
-        return extractUUID(exchange, "partyId", "X-Party-Id");
-    }
+    @Autowired
+    private OnboardingApplicationService onboardingService;
     
-    @Override
-    public Mono<UUID> resolveTenantId(ServerWebExchange exchange) {
-        // Extract from JWT, header, or subdomain
-        return extractUUID(exchange, "tenantId", "X-Tenant-Id");
-    }
-    
-    @Override
-    public Mono<UUID> resolveContractId(ServerWebExchange exchange) {
-        // Extract from path variable or header (if applicable)
-        return extractUUIDFromPath(exchange, "contractId")
-            .switchIfEmpty(extractUUID(exchange, "contractId", "X-Contract-Id"));
-    }
-    
-    @Override
-    public Mono<UUID> resolveProductId(ServerWebExchange exchange) {
-        // Extract from path variable or header (if applicable)
-        return extractUUIDFromPath(exchange, "productId")
-            .switchIfEmpty(extractUUID(exchange, "productId", "X-Product-Id"));
-    }
-    
-    // Optional: Enrich with roles from platform service
-    @Override
-    protected Mono<Set<String>> resolveRoles(AppContext context, ServerWebExchange exchange) {
-        // TODO: Call common-platform-customer-mgmt-sdk
-        // return customerMgmtClient.getPartyRoles(context.getPartyId(), context.getContractId());
-        return Mono.just(Set.of()); // Return empty set until SDK is integrated
-    }
-    
-    // Optional: Enrich with permissions from platform service
-    @Override
-    protected Mono<Set<String>> resolvePermissions(AppContext context, ServerWebExchange exchange) {
-        // TODO: Call common-platform-contract-mgmt-sdk
-        // return contractMgmtClient.getPartyPermissions(context.getPartyId(), context.getContractId());
-        return Mono.just(Set.of()); // Return empty set until SDK is integrated
+    @PostMapping("/start")
+    @Secure(requireParty = true, requireRole = "customer:onboard")
+    public Mono<OnboardingResponse> startOnboarding(
+            @RequestBody OnboardingRequest request,
+            ServerWebExchange exchange) {
+        
+        // Automatically resolves: party + tenant (no contract/product)
+        return resolveExecutionContext(exchange)
+            .flatMap(context -> onboardingService.startOnboarding(context, request));
     }
 }
 ```
 
+**Context resolved:** Party ID, Tenant ID, Roles, Permissions, Config
+
 ---
 
-#### AbstractConfigResolver - Fetch Tenant Configuration
+#### 🎯 Option 2: Contract-Scoped Endpoints (Accounts, Beneficiaries)
 
-**Purpose:** Load tenant-specific configuration (providers, feature flags, settings).
-
-**You must implement:**
-- `fetchConfigFromPlatform(UUID tenantId)` - Fetch config from your config service
+Use `AbstractContractController` for endpoints scoped to a contract:
 
 ```java
+@RestController
+@RequestMapping("/api/v1/contracts/{contractId}/accounts")
+public class AccountController extends AbstractContractController {
+    
+    @Autowired
+    private AccountApplicationService accountService;
+    
+    @GetMapping
+    @Secure(requireParty = true, requireContract = true, requireRole = "account:viewer")
+    public Mono<List<AccountDTO>> listAccounts(
+            @PathVariable UUID contractId,
+            ServerWebExchange exchange) {
+        
+        // Automatically resolves: party + tenant + contract
+        return resolveExecutionContext(exchange, contractId)
+            .flatMap(context -> accountService.listAccounts(context));
+    }
+}
+```
+
+**Context resolved:** Party ID, Tenant ID, Contract ID, Roles (party+contract), Permissions, Config
+
+---
+
+#### 🎯 Option 3: Product-Scoped Endpoints (Transactions, Cards)
+
+Use `AbstractProductController` for endpoints scoped to a product within a contract:
+
+```java
+@RestController
+@RequestMapping("/api/v1/contracts/{contractId}/products/{productId}/transactions")
+public class TransactionController extends AbstractProductController {
+    
+    @Autowired
+    private TransactionApplicationService transactionService;
+    
+    @GetMapping
+    @Secure(requireParty = true, requireContract = true, requireProduct = true, requireRole = "transaction:viewer")
+    public Mono<List<TransactionDTO>> listTransactions(
+            @PathVariable UUID contractId,
+            @PathVariable UUID productId,
+            ServerWebExchange exchange) {
+        
+        // Automatically resolves: party + tenant + contract + product
+        return resolveExecutionContext(exchange, contractId, productId)
+            .flatMap(context -> transactionService.listTransactions(context));
+    }
+}
+```
+
+**Context resolved:** Party ID, Tenant ID, Contract ID, Product ID, Roles (party+contract+product), Permissions, Config
+
+---
+
+**What the library handles automatically:**
+- ✅ Extracts `partyId` from Istio header (`X-Party-Id`)
+- ✅ Resolves `tenantId` by calling `common-platform-config-mgmt` with the partyId
+- ✅ Uses `contractId` and `productId` from your `@PathVariable` annotations
+- ✅ Enriches context with roles and permissions from platform SDKs
+- ✅ Loads tenant configuration (providers, feature flags, settings)
+- ✅ Validates security requirements from `@Secure` annotations
+- ✅ Returns 401/403 for unauthorized requests
+
+---
+
+#### 🔧 Advanced: Custom Context Resolution (Optional)
+
+If you need custom context resolution logic (e.g., non-Istio environments), you can provide your own implementations:
+
+**Custom Context Resolver:**
+```java
 @Component
+@Primary // Override the default
+public class CustomContextResolver extends AbstractContextResolver {
+    
+    @Override
+    public Mono<UUID> resolvePartyId(ServerWebExchange exchange) {
+        // Custom logic: extract from JWT, session, etc.
+        return extractFromJWT(exchange, "sub");
+    }
+    
+    @Override
+    public Mono<UUID> resolveTenantId(ServerWebExchange exchange) {
+        // Custom logic: extract from subdomain, header, etc.
+        return extractFromSubdomain(exchange);
+    }
+}
+```
+
+**Custom Config Resolver:**
+```java
+@Component
+@Primary // Override the default
 public class CustomConfigResolver extends AbstractConfigResolver {
     
-    // TODO: Inject your config management SDK
-    // private final ConfigManagementClient configClient;
+    private final ConfigManagementClient configClient;
     
     @Override
     protected Mono<AppConfig> fetchConfigFromPlatform(UUID tenantId) {
-        // TODO: Call common-platform-config-mgmt-sdk
-        /*
         return configClient.getTenantConfig(tenantId)
             .map(response -> AppConfig.builder()
                 .tenantId(response.getTenantId())
@@ -285,46 +380,10 @@ public class CustomConfigResolver extends AbstractConfigResolver {
                 .featureFlags(response.getFeatureFlags())
                 .settings(response.getSettings())
                 .build());
-        */
-        
-        // Placeholder until SDK is integrated
-        return Mono.just(AppConfig.builder()
-            .tenantId(tenantId)
-            .build());
     }
 }
 ```
 
----
-
-#### AbstractSecurityAuthorizationService - Authorization Decision
-
-**Purpose:** Decide if a request should be authorized based on roles/permissions.
-
-**Default behavior:** Checks if user's roles/permissions match required roles/permissions.
-
-**You can override:**
-- `authorizeWithSecurityCenter(...)` - Integrate with SecurityCenter for complex policies
-
-```java
-@Service
-public class CustomAuthorizationService extends AbstractSecurityAuthorizationService {
-    
-    // OPTION 1: Use default role/permission matching (no code needed)
-    // Just declare the class and Spring will use the default implementation
-    
-    // OPTION 2: Integrate with SecurityCenter (optional)
-    /*
-    @Override
-    protected Mono<AppSecurityContext> authorizeWithSecurityCenter(
-            AppContext context, AppSecurityContext securityContext) {
-        return securityCenterClient.evaluate(context, securityContext);
-    }
-    */
-}
-```
-
----
 
 #### AbstractApplicationService - Business Process Orchestration
 
@@ -450,37 +509,25 @@ public class TransactionController extends AbstractProductController {
 
 ---
 
-### 4. Use Security Annotations
-
-```java
-@RestController
-@RequestMapping("/api/v1/accounts")
-@Secure(roles = {"ACCOUNT_HOLDER"})
-public class AccountController {
-    
-    @PostMapping("/{id}/transfer")
-    @Secure(roles = "ACCOUNT_OWNER", permissions = "TRANSFER_FUNDS")
-    public Mono<Transfer> transfer(@PathVariable UUID id, 
-                                   @RequestBody TransferRequest request,
-                                   ServerWebExchange exchange) {
-        return applicationService.transferFunds(exchange, request);
-    }
-}
-```
-
 ## Key Features
 
-### 🎯 Context Management
-- **Automatic Resolution**: Extract party, contract, product, tenant from requests
-- **Enrichment**: Fetch roles and permissions from platform services
+### 🎯 Context Management (Controller-Based)
+- **Istio Integration**: `X-Party-Id` extracted from header (Istio-injected after JWT validation)
+- **Tenant Resolution**: `tenantId` resolved by calling `common-platform-config-mgmt` with partyId
+- **Path Variable Extraction**: `contractId` and `productId` extracted from `@PathVariable` in controllers
+- **Automatic Enrichment**: Roles and permissions fetched from platform SDKs based on party+contract+product
+- **Three Controller Types**: `AbstractPartyController`, `AbstractContractController`, `AbstractProductController`
+- **Flexible Scoping**: Support party-only, party+contract, and party+contract+product contexts
 - **Caching**: Built-in caching for performance optimization
 - **Immutability**: Thread-safe context objects
 
-### 🔒 Security & Authorization
-- **Declarative**: `@Secure` annotation for clean, self-documenting code
-- **Programmatic**: `EndpointSecurityRegistry` for dynamic configuration
-- **SecurityCenter Integration**: Ready for complex authorization policies
-- **Role & Permission Based**: Fine-grained access control
+### 🔒 Security & Authorization (Controller-Based)
+- **Declarative**: `@Secure` annotation with `requireParty`, `requireContract`, `requireProduct`, `requireRole`, `requirePermission`
+- **Context-Aware**: Security validation based on fully resolved ApplicationExecutionContext
+- **Default Authorization**: `DefaultSecurityAuthorizationService` validates roles and permissions automatically
+- **SecurityCenter Ready**: Integration points for complex authorization policies
+- **Role & Permission Based**: Fine-grained access control based on party role in contract/product
+- **Flexible**: Works with all three controller types (party, contract, product)
 
 ### ⚙️ Configuration Management
 - **Multi-tenant**: Per-tenant configuration and provider settings
@@ -554,33 +601,46 @@ The [API_REFERENCE.md](docs/API_REFERENCE.md) provides:
 
 The library provides clear integration points (marked with TODO) for:
 
-### 1. Customer Management (`common-platform-customer-mgmt-sdk`)
-- Resolve party information
-- Fetch party roles in contracts
-- Validate party status
-
-### 2. Contract Management (`common-platform-contract-mgmt-sdk`)
-- Resolve contract information
-- Fetch party permissions in contract
-- Validate contract status
-
-### 3. Product Management (`common-platform-product-mgmt-sdk`)
-- Resolve product information
-- Fetch product-specific configuration
-- Validate product status and availability
-- Get product features and limits
-
-### 4. Configuration Management (`common-platform-config-mgmt-sdk`)
-- Fetch tenant configuration
+### 1. Configuration Management (`common-platform-config-mgmt-sdk`) ⭐
+**Purpose:** Tenant resolution and multi-tenant configuration
+- **Tenant Resolution:** `GET /api/v1/parties/{partyId}/tenant` → Returns tenantId for a party
+- Fetch tenant configuration (providers, settings)
 - Get provider configurations (KYC, payment gateways, etc.)
 - Retrieve feature flags
 - Manage tenant-specific settings
 
-### 5. Security Center (Future)
-- Complex authorization policies
-- Attribute-Based Access Control (ABAC)
-- Audit trail of authorization decisions
-- Policy evaluation and enforcement
+### 2. FireflySessionManager (Security Center) ⭐⭐⭐
+**Purpose:** Authorization, session management, role/permission resolution
+- **Party Session:** Track which contracts a party has access to
+- **Contract Access:** Validate if party can access specific contract/product
+- **Role Resolution:** Get party roles in contract (owner, viewer, etc.)
+- **Role Scopes:** Support party-level, contract-level, product-level roles
+- **Permission Derivation:** Convert roles to permissions using role mappings
+- **Session Caching:** Cache party sessions for performance
+
+**Example Flow:**
+```java
+// 1. Get party session
+PartySession session = sessionManager.getPartySession(partyId, tenantId);
+
+// 2. Check contract access
+boolean hasAccess = session.hasContractAccess(contractId);
+
+// 3. Get roles for contract
+Set<String> roles = session.getContractRoles(contractId, productId);
+// Returns: ["owner", "account:viewer", "transaction:creator"]
+
+// 4. Derive permissions
+Set<String> permissions = session.getPermissionsForRoles(roles);
+// Returns: ["account:read", "account:update", "transaction:create"]
+```
+
+### 3. Product Management (`common-platform-product-mgmt-sdk`) (Optional)
+**Purpose:** Product-specific information and configuration
+- Resolve product information
+- Fetch product-specific configuration
+- Validate product status and availability
+- Get product features and limits
 
 ## Design Principles
 
