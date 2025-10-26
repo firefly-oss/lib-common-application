@@ -125,21 +125,12 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- TODO: Add firefly-security-center-sdk dependency once it becomes available
-             This SDK will provide:
-             - FireflySessionManager interface and implementation
-             - Authorization via sessionManager.authorize(partyId, contractId, productId, roles, permissions)
-             - Party-Contract-Product relationship resolution
-             - Role and permission management
-             
-             The SDK will be injected automatically and used by AbstractSecurityAuthorizationService
-             for authorization decisions.
+        <!-- Security Center Session Module -->
         <dependency>
             <groupId>com.firefly</groupId>
-            <artifactId>firefly-security-center-sdk</artifactId>
+            <artifactId>common-platform-security-center-session</artifactId>
             <version>${project.version}</version>
         </dependency>
-        -->
 
         <dependency>
             <groupId>com.firefly</groupId>
