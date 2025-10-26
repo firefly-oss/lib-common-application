@@ -453,25 +453,25 @@ registry.registerEndpoint("/api/accounts", "POST",
 
 ## Integration Tests (Completed)
 
-Los siguientes componentes ahora tienen integration tests completos:
+The following components now have complete integration tests:
 
-1. **ApplicationMetadataProvider** (16 tests) - ✅ Completo
-   - Escaneo de @FireflyApplication annotation
-   - Construcción de AppMetadata bean
-   - Extracción de propiedades de Spring
-   - Build info desde properties
+1. **ApplicationMetadataProvider** (16 tests) - ✅ Complete
+   - @FireflyApplication annotation scanning
+   - AppMetadata bean construction
+   - Spring property extraction
+   - Build info from properties
 
-2. **SecurityAspect** (9 tests) - ✅ Completo
-   - Interceptación AOP de @Secure
-   - Autorización con roles y permisos
+2. **SecurityAspect** (9 tests) - ✅ Complete
+   - AOP interception of @Secure
+   - Authorization with roles and permissions
    - Access denied scenarios
-   - Verificación de annotation attributes (roles, permissions, combined)
+   - Annotation attribute verification (roles, permissions, combined)
    - AppContext propagation
    - Security context building from annotations
 
-### Pendiente (Futuro)
+### Pending (Future)
 
-3. **ApplicationLayerAutoConfiguration** - Requiere auto-configuration testing específico
+3. **ApplicationLayerAutoConfiguration** - Requires specific auto-configuration testing
    - Bean registration validation
    - Component scanning verification
    - Property binding tests
