@@ -85,7 +85,7 @@ This library provides a **fully integrated, controller-based** application layer
 - ✅ **@FireflyApplication** annotation for application metadata and service discovery
 - ✅ **Context Architecture** (AppContext, AppConfig, AppSecurityContext, ApplicationExecutionContext)
 - ✅ **@Secure Annotation** system for declarative security
-- ✅ **🎯 Three Base Controllers** – `AbstractApplicationController`, `AbstractContractController`, `AbstractProductController`
+- ✅ **🎯 Two Base Controllers** – `AbstractApplicationController`, `AbstractResourceController`
 - ✅ **🎯 Automatic Context Resolution** – Party/Tenant from Istio headers + Contract/Product from path variables
 - ✅ **🎯 Default Config Resolver** – Fetches tenant configuration automatically
 - ✅ **🎯 Default Security Authorization** – Validates roles/permissions automatically
@@ -195,7 +195,7 @@ public class MyServiceApplication {
 
 ### 3. Choose Your Controller Base Class
 
-**The library provides three base controller classes** that automatically resolve context based on your endpoint's scope:
+**The library provides two base controller classes** that automatically resolve context based on your endpoint's scope:
 
 #### 🎯 Architecture: How Context Resolution Works
 
@@ -210,8 +210,7 @@ public class MyServiceApplication {
 ┌──────────────────────────────────────────────────┐
 │        Your Controller (Extracts Path Variables) │
 │  - Extends AbstractApplicationController         │
-│    OR AbstractContractController                 │
-│    OR AbstractProductController                  │
+│    OR AbstractResourceController                 │
 │  - Extracts contractId from @PathVariable        │
 │  - Extracts productId from @PathVariable         │
 │  - Calls resolveExecutionContext(exchange, ...)  │
@@ -268,43 +267,14 @@ public class OnboardingController extends AbstractApplicationController {
 
 ---
 
-#### 🎯 Option 2: Contract-Scoped Endpoints (Accounts, Beneficiaries)
+#### 🎯 Option 2: Resource Endpoints (Accounts, Transactions, Cards)
 
-Use `AbstractContractController` for endpoints scoped to a contract:
-
-```java
-@RestController
-@RequestMapping("/api/v1/contracts/{contractId}/accounts")
-public class AccountController extends AbstractContractController {
-    
-    @Autowired
-    private AccountApplicationService accountService;
-    
-    @GetMapping
-    @Secure(requireParty = true, requireContract = true, requireRole = "account:viewer")
-    public Mono<List<AccountDTO>> listAccounts(
-            @PathVariable UUID contractId,
-            ServerWebExchange exchange) {
-        
-        // Automatically resolves: party + tenant + contract
-        return resolveExecutionContext(exchange, contractId)
-            .flatMap(context -> accountService.listAccounts(context));
-    }
-}
-```
-
-**Context resolved:** Party ID, Tenant ID, Contract ID, Roles (party+contract), Permissions, Config
-
----
-
-#### 🎯 Option 3: Product-Scoped Endpoints (Transactions, Cards)
-
-Use `AbstractProductController` for endpoints scoped to a product within a contract:
+Use `AbstractResourceController` for endpoints that require BOTH contract and product context:
 
 ```java
 @RestController
 @RequestMapping("/api/v1/contracts/{contractId}/products/{productId}/transactions")
-public class TransactionController extends AbstractProductController {
+public class TransactionController extends AbstractResourceController {
     
     @Autowired
     private TransactionApplicationService transactionService;
@@ -436,47 +406,20 @@ public class CustomerOnboardingService extends AbstractApplicationService {
 
 ---
 
-#### Optional: AbstractContractController / AbstractProductController
+#### Optional: AbstractResourceController Helper Methods
 
-**Purpose:** Base controllers that provide helper methods for validating contract/product IDs.
+**Purpose:** `AbstractResourceController` provides helper methods for resource endpoints.
 
-**What they provide:**
-- `AbstractContractController`: Validation and logging for contract-scoped endpoints
-- `AbstractProductController`: Validation and logging for contract + product endpoints
+**What it provides:**
+- `requireContext(UUID, UUID)` - Validates both contractId and productId (automatically called by `resolveExecutionContext`)
+- `logOperation(UUID, UUID, String)` - Logs operation with full resource context
 
-**Example with AbstractContractController:**
-
-```java
-@RestController
-@RequestMapping("/api/v1/contracts/{contractId}/accounts")
-public class AccountController extends AbstractContractController {
-    
-    @Autowired
-    private AccountApplicationService accountService;
-    
-    @GetMapping
-    @Secure(roles = "ACCOUNT_VIEWER")
-    public Mono<List<AccountDto>> listAccounts(
-            @PathVariable UUID contractId,
-            ServerWebExchange exchange) {
-        
-        // Validate contractId is present (throws exception if null)
-        requireContractId(contractId);
-        
-        // Optional: Log the operation for debugging
-        logOperation(contractId, "listAccounts");
-        
-        return accountService.listAccountsByContract(exchange, contractId);
-    }
-}
-```
-
-**Example with AbstractProductController:**
+**Example:**
 
 ```java
 @RestController
 @RequestMapping("/api/v1/contracts/{contractId}/products/{productId}/transactions")
-public class TransactionController extends AbstractProductController {
+public class TransactionController extends AbstractResourceController {
     
     @Autowired
     private TransactionApplicationService transactionService;
@@ -488,24 +431,17 @@ public class TransactionController extends AbstractProductController {
             @PathVariable UUID productId,
             ServerWebExchange exchange) {
         
-        // Validate both IDs are present
-        requireContext(contractId, productId);
-        
-        // Optional: Log the operation
+        // Log the operation (optional)
         logOperation(contractId, productId, "listTransactions");
         
-        return transactionService.listTransactions(exchange, contractId, productId);
+        // Context resolution automatically validates both IDs
+        return resolveExecutionContext(exchange, contractId, productId)
+            .flatMap(context -> transactionService.listTransactions(context));
     }
 }
 ```
 
-**Available methods:**
-- `requireContractId(UUID)` - Validates contractId is not null
-- `requireProductId(UUID)` - Validates productId is not null  
-- `requireContext(UUID, UUID)` - Validates both contractId and productId
-- `logOperation(...)` - Logs operation with contract/product context
-
-**Note:** These are **completely optional** helper classes. Use them only if they help you.
+**Note:** These helpers are **completely optional** – use them only if they add value.
 
 ---
 
@@ -516,8 +452,8 @@ public class TransactionController extends AbstractProductController {
 - **Tenant Resolution**: `tenantId` resolved by calling `common-platform-config-mgmt` with partyId
 - **Path Variable Extraction**: `contractId` and `productId` extracted from `@PathVariable` in controllers
 - **Automatic Enrichment**: Roles and permissions fetched from platform SDKs based on party+contract+product
-- **Three Controller Types**: `AbstractApplicationController`, `AbstractContractController`, `AbstractProductController`
-- **Flexible Scoping**: Support application-layer, party+contract, and party+contract+product contexts
+- **Two Controller Types**: `AbstractApplicationController`, `AbstractResourceController`
+- **Clear Scoping**: Application-layer (no contract/product) or Resource-layer (contract + product both required)
 - **Caching**: Built-in caching for performance optimization
 - **Immutability**: Thread-safe context objects
 
@@ -527,7 +463,7 @@ public class TransactionController extends AbstractProductController {
 - **Default Authorization**: `DefaultSecurityAuthorizationService` validates roles and permissions automatically
 - **SecurityCenter Ready**: Integration points for complex authorization policies
 - **Role & Permission Based**: Fine-grained access control based on party role in contract/product
-- **Flexible**: Works with all three controller types (party, contract, product)
+- **Flexible**: Works with both controller types (application, resource)
 
 ### ⚙️ Configuration Management
 - **Multi-tenant**: Per-tenant configuration and provider settings

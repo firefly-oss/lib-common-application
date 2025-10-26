@@ -25,9 +25,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@DisplayName("AbstractContractController Tests")
+@DisplayName("AbstractResourceController Tests")
 @ExtendWith(MockitoExtension.class)
-class AbstractContractControllerTest {
+class AbstractResourceControllerTest {
     
     @Mock
     private ContextResolver contextResolver;
@@ -38,29 +38,32 @@ class AbstractContractControllerTest {
     @Mock
     private ServerWebExchange exchange;
     
-    private TestContractController controller;
+    private TestResourceController controller;
     
     private UUID testPartyId;
     private UUID testTenantId;
     private UUID testContractId;
+    private UUID testProductId;
     
     @BeforeEach
     void setUp() {
-        controller = new TestContractController();
+        controller = new TestResourceController();
         ReflectionTestUtils.setField(controller, "contextResolver", contextResolver);
         ReflectionTestUtils.setField(controller, "configResolver", configResolver);
         
         testPartyId = UUID.randomUUID();
         testTenantId = UUID.randomUUID();
         testContractId = UUID.randomUUID();
+        testProductId = UUID.randomUUID();
     }
     
     @Test
-    @DisplayName("Should validate valid contract ID")
-    void shouldValidateValidContractId() {
+    @DisplayName("Should validate valid context (both IDs)")
+    void shouldValidateValidContext() {
         UUID contractId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
         
-        assertDoesNotThrow(() -> controller.testRequireContractId(contractId));
+        assertDoesNotThrow(() -> controller.testRequireContext(contractId, productId));
     }
     
     @Test
@@ -68,42 +71,52 @@ class AbstractContractControllerTest {
     void shouldThrowExceptionForNullContractId() {
         IllegalArgumentException exception = assertThrows(
             IllegalArgumentException.class,
-            () -> controller.testRequireContractId(null)
+            () -> controller.testRequireContext(null, testProductId)
         );
         
         assertTrue(exception.getMessage().contains("contractId is required"));
     }
     
+    @Test
+    @DisplayName("Should throw exception for null product ID")
+    void shouldThrowExceptionForNullProductId() {
+        IllegalArgumentException exception = assertThrows(
+            IllegalArgumentException.class,
+            () -> controller.testRequireContext(testContractId, null)
+        );
+        
+        assertTrue(exception.getMessage().contains("productId is required"));
+    }
     
     @Test
-    @DisplayName("Should log operation with contract ID")
-    void shouldLogOperationWithContractId() {
+    @DisplayName("Should log operation with resource context")
+    void shouldLogOperationWithResourceContext() {
         UUID contractId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
         
-        // Should not throw exception
-        assertDoesNotThrow(() -> controller.testLogOperation(contractId, "testOperation"));
+        assertDoesNotThrow(() -> controller.testLogOperation(contractId, productId, "testOperation"));
     }
     
     @Test
     @DisplayName("Should handle null operation name in logging")
     void shouldHandleNullOperationNameInLogging() {
         UUID contractId = UUID.randomUUID();
+        UUID productId = UUID.randomUUID();
         
-        // Should not throw exception even with null operation
-        assertDoesNotThrow(() -> controller.testLogOperation(contractId, null));
+        assertDoesNotThrow(() -> controller.testLogOperation(contractId, productId, null));
     }
     
     @Test
-    @DisplayName("Should resolve contract-scoped context")
-    void shouldResolveContractScopedContext() {
+    @DisplayName("Should resolve resource context (contract + product)")
+    void shouldResolveResourceContext() {
         // Given
         AppContext appContext = AppContext.builder()
                 .partyId(testPartyId)
                 .tenantId(testTenantId)
                 .contractId(testContractId)
-                .productId(null)  // No product for contract-only
-                .roles(Set.of("account:viewer"))
-                .permissions(Set.of("account:read"))
+                .productId(testProductId)
+                .roles(Set.of("transaction:viewer"))
+                .permissions(Set.of("transaction:read"))
                 .build();
         
         AppConfig appConfig = AppConfig.builder()
@@ -111,13 +124,14 @@ class AbstractContractControllerTest {
                 .tenantName("Test Tenant")
                 .build();
         
-        when(contextResolver.resolveContext(any(ServerWebExchange.class), eq(testContractId), isNull()))
+        when(contextResolver.resolveContext(any(ServerWebExchange.class), eq(testContractId), eq(testProductId)))
                 .thenReturn(Mono.just(appContext));
         when(configResolver.resolveConfig(testTenantId))
                 .thenReturn(Mono.just(appConfig));
         
         // When
-        Mono<ApplicationExecutionContext> result = controller.testResolveExecutionContext(exchange, testContractId);
+        Mono<ApplicationExecutionContext> result = controller.testResolveExecutionContext(
+                exchange, testContractId, testProductId);
         
         // Then
         StepVerifier.create(result)
@@ -126,11 +140,11 @@ class AbstractContractControllerTest {
                     assertThat(ctx.getContext().getPartyId()).isEqualTo(testPartyId);
                     assertThat(ctx.getContext().getTenantId()).isEqualTo(testTenantId);
                     assertThat(ctx.getContext().getContractId()).isEqualTo(testContractId);
-                    assertThat(ctx.getContext().getProductId()).isNull();
+                    assertThat(ctx.getContext().getProductId()).isEqualTo(testProductId);
                 })
                 .verifyComplete();
         
-        verify(contextResolver).resolveContext(eq(exchange), eq(testContractId), isNull());
+        verify(contextResolver).resolveContext(eq(exchange), eq(testContractId), eq(testProductId));
         verify(configResolver).resolveConfig(testTenantId);
     }
     
@@ -139,27 +153,36 @@ class AbstractContractControllerTest {
     void shouldThrowExceptionWhenContractIdIsNullInContextResolution() {
         // When & Then
         assertThrows(IllegalArgumentException.class, () -> {
-            controller.testResolveExecutionContext(exchange, null).block();
+            controller.testResolveExecutionContext(exchange, null, testProductId).block();
+        });
+    }
+    
+    @Test
+    @DisplayName("Should throw exception when product ID is null in context resolution")
+    void shouldThrowExceptionWhenProductIdIsNullInContextResolution() {
+        // When & Then
+        assertThrows(IllegalArgumentException.class, () -> {
+            controller.testResolveExecutionContext(exchange, testContractId, null).block();
         });
     }
     
     /**
-     * Concrete test implementation of AbstractContractController
+     * Concrete test implementation of AbstractResourceController
      * to expose protected methods for testing
      */
-    static class TestContractController extends AbstractContractController {
+    static class TestResourceController extends AbstractResourceController {
         
-        public void testRequireContractId(UUID contractId) {
-            requireContractId(contractId);
+        public void testRequireContext(UUID contractId, UUID productId) {
+            requireContext(contractId, productId);
         }
         
-        public void testLogOperation(UUID contractId, String operation) {
-            logOperation(contractId, operation);
+        public void testLogOperation(UUID contractId, UUID productId, String operation) {
+            logOperation(contractId, productId, operation);
         }
         
         public Mono<ApplicationExecutionContext> testResolveExecutionContext(
-                ServerWebExchange exchange, UUID contractId) {
-            return resolveExecutionContext(exchange, contractId);
+                ServerWebExchange exchange, UUID contractId, UUID productId) {
+            return resolveExecutionContext(exchange, contractId, productId);
         }
     }
 }

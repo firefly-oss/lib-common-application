@@ -20,8 +20,7 @@ import com.firefly.common.application.context.AppConfig;
 import com.firefly.common.application.context.AppContext;
 import com.firefly.common.application.context.ApplicationExecutionContext;
 import com.firefly.common.application.controller.AbstractApplicationController;
-import com.firefly.common.application.controller.AbstractContractController;
-import com.firefly.common.application.controller.AbstractProductController;
+import com.firefly.common.application.controller.AbstractResourceController;
 import com.firefly.common.application.resolver.ConfigResolver;
 import com.firefly.common.application.resolver.ContextResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,20 +47,19 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Integration test demonstrating all three controller types:
+ * Integration test demonstrating both controller types:
  * - AbstractApplicationController (application-layer, no contract/product)
- * - AbstractContractController (party + contract)
- * - AbstractProductController (party + contract + product)
+ * - AbstractResourceController (contract + product, both required)
  * 
  * This test validates the complete architecture:
  * 1. Istio injects X-Party-Id header
- * 2. Config-mgmt resolves tenantId
+ * 2. Config-mgmt resolves tenantId from partyId
  * 3. Controllers extract contractId/productId from path variables
  * 4. FireflySessionManager provides roles/permissions (mocked)
- * 5. Context is fully resolved
+ * 5. Context is fully resolved with complete resource hierarchy
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("Controller Integration Test - All Three Controller Types")
+@DisplayName("Controller Integration Test - Two Controller Types")
 class ControllerIntegrationTest {
     
     @Mock
@@ -82,8 +80,7 @@ class ControllerIntegrationTest {
     private UUID testProductId;
     
     private TestApplicationController applicationController;
-    private TestContractController contractController;
-    private TestProductController productController;
+    private TestResourceController resourceController;
     
     @BeforeEach
     void setUp() {
@@ -94,16 +91,13 @@ class ControllerIntegrationTest {
         
         // Setup controllers
         applicationController = new TestApplicationController();
-        contractController = new TestContractController();
-        productController = new TestProductController();
+        resourceController = new TestResourceController();
         
         // Inject dependencies
         ReflectionTestUtils.setField(applicationController, "contextResolver", contextResolver);
         ReflectionTestUtils.setField(applicationController, "configResolver", configResolver);
-        ReflectionTestUtils.setField(contractController, "contextResolver", contextResolver);
-        ReflectionTestUtils.setField(contractController, "configResolver", configResolver);
-        ReflectionTestUtils.setField(productController, "contextResolver", contextResolver);
-        ReflectionTestUtils.setField(productController, "configResolver", configResolver);
+        ReflectionTestUtils.setField(resourceController, "contextResolver", contextResolver);
+        ReflectionTestUtils.setField(resourceController, "configResolver", configResolver);
     }
     
     @Test
@@ -148,49 +142,8 @@ class ControllerIntegrationTest {
     }
     
     @Test
-    @DisplayName("Scenario 2: Contract-scoped endpoint (List Accounts)")
-    void testContractScopedEndpoint() {
-        // Given: Account listing endpoint with party + contract context
-        AppContext appContext = AppContext.builder()
-                .partyId(testPartyId)
-                .tenantId(testTenantId)
-                .contractId(testContractId)
-                .productId(null)  // No product for contract-level endpoint
-                .roles(Set.of("owner", "account:viewer"))
-                .permissions(Set.of("account:read", "account:list"))
-                .build();
-        
-        AppConfig appConfig = AppConfig.builder()
-                .tenantId(testTenantId)
-                .tenantName("Test Bank")
-                .build();
-        
-        when(contextResolver.resolveContext(any(ServerWebExchange.class), eq(testContractId), isNull()))
-                .thenReturn(Mono.just(appContext));
-        when(configResolver.resolveConfig(testTenantId))
-                .thenReturn(Mono.just(appConfig));
-        
-        // When: Call contract controller endpoint with contractId
-        Mono<ApplicationExecutionContext> result = contractController.listAccounts(testContractId, exchange);
-        
-        // Then: Context is resolved with party + tenant + contract
-        StepVerifier.create(result)
-                .assertNext(ctx -> {
-                    assertThat(ctx.getContext().getPartyId()).isEqualTo(testPartyId);
-                    assertThat(ctx.getContext().getTenantId()).isEqualTo(testTenantId);
-                    assertThat(ctx.getContext().getContractId()).isEqualTo(testContractId);
-                    assertThat(ctx.getContext().getProductId()).isNull();
-                    assertThat(ctx.getContext().getRoles()).contains("owner", "account:viewer");
-                })
-                .verifyComplete();
-        
-        verify(contextResolver).resolveContext(eq(exchange), eq(testContractId), isNull());
-        verify(configResolver).resolveConfig(testTenantId);
-    }
-    
-    @Test
-    @DisplayName("Scenario 3: Product-scoped endpoint (List Transactions)")
-    void testProductScopedEndpoint() {
+    @DisplayName("Scenario 2: Resource endpoint (List Transactions with contract + product)")
+    void testResourceEndpoint() {
         // Given: Transaction listing endpoint with full context
         AppContext appContext = AppContext.builder()
                 .partyId(testPartyId)
@@ -211,11 +164,11 @@ class ControllerIntegrationTest {
         when(configResolver.resolveConfig(testTenantId))
                 .thenReturn(Mono.just(appConfig));
         
-        // When: Call product controller endpoint with contractId + productId
-        Mono<ApplicationExecutionContext> result = productController.listTransactions(
+        // When: Call resource controller endpoint with contractId + productId (both required)
+        Mono<ApplicationExecutionContext> result = resourceController.listTransactions(
                 testContractId, testProductId, exchange);
         
-        // Then: Context is resolved with full hierarchy
+        // Then: Context is resolved with complete resource hierarchy
         StepVerifier.create(result)
                 .assertNext(ctx -> {
                     assertThat(ctx.getContext().getPartyId()).isEqualTo(testPartyId);
@@ -231,9 +184,9 @@ class ControllerIntegrationTest {
     }
     
     @Test
-    @DisplayName("Scenario 4: End-to-end flow - Onboarding → Create Contract → List Transactions")
+    @DisplayName("Scenario 3: End-to-end flow - Onboarding → Access Resources")
     void testEndToEndFlow() {
-        // Step 1: Onboarding (party-only)
+        // Step 1: Onboarding (application-layer, no contract/product)
         AppContext onboardingContext = AppContext.builder()
                 .partyId(testPartyId)
                 .tenantId(testTenantId)
@@ -248,29 +201,14 @@ class ControllerIntegrationTest {
                 .thenReturn(Mono.just(config));
         
         StepVerifier.create(applicationController.handleOnboarding(exchange))
-                .assertNext(ctx -> assertThat(ctx.getContext().getContractId()).isNull())
-                .verifyComplete();
-        
-        // Step 2: After onboarding, party creates contract (becomes owner)
-        AppContext contractContext = AppContext.builder()
-                .partyId(testPartyId)
-                .tenantId(testTenantId)
-                .contractId(testContractId)
-                .roles(Set.of("owner", "account:viewer"))
-                .build();
-        
-        when(contextResolver.resolveContext(any(), eq(testContractId), isNull()))
-                .thenReturn(Mono.just(contractContext));
-        
-        StepVerifier.create(contractController.listAccounts(testContractId, exchange))
                 .assertNext(ctx -> {
-                    assertThat(ctx.getContext().getContractId()).isEqualTo(testContractId);
-                    assertThat(ctx.getContext().getRoles()).contains("owner");
+                    assertThat(ctx.getContext().getContractId()).isNull();
+                    assertThat(ctx.getContext().getProductId()).isNull();
                 })
                 .verifyComplete();
         
-        // Step 3: Access product-level resources (transactions)
-        AppContext productContext = AppContext.builder()
+        // Step 2: After onboarding, access resources with contract + product (both required)
+        AppContext resourceContext = AppContext.builder()
                 .partyId(testPartyId)
                 .tenantId(testTenantId)
                 .contractId(testContractId)
@@ -279,12 +217,13 @@ class ControllerIntegrationTest {
                 .build();
         
         when(contextResolver.resolveContext(any(), eq(testContractId), eq(testProductId)))
-                .thenReturn(Mono.just(productContext));
+                .thenReturn(Mono.just(resourceContext));
         
-        StepVerifier.create(productController.listTransactions(testContractId, testProductId, exchange))
+        StepVerifier.create(resourceController.listTransactions(testContractId, testProductId, exchange))
                 .assertNext(ctx -> {
+                    assertThat(ctx.getContext().getContractId()).isEqualTo(testContractId);
                     assertThat(ctx.getContext().getProductId()).isEqualTo(testProductId);
-                    assertThat(ctx.getContext().getRoles()).contains("transaction:viewer");
+                    assertThat(ctx.getContext().getRoles()).contains("owner", "transaction:viewer");
                 })
                 .verifyComplete();
     }
@@ -297,13 +236,7 @@ class ControllerIntegrationTest {
         }
     }
     
-    static class TestContractController extends AbstractContractController {
-        public Mono<ApplicationExecutionContext> listAccounts(UUID contractId, ServerWebExchange exchange) {
-            return resolveExecutionContext(exchange, contractId);
-        }
-    }
-    
-    static class TestProductController extends AbstractProductController {
+    static class TestResourceController extends AbstractResourceController {
         public Mono<ApplicationExecutionContext> listTransactions(
                 UUID contractId, UUID productId, ServerWebExchange exchange) {
             return resolveExecutionContext(exchange, contractId, productId);

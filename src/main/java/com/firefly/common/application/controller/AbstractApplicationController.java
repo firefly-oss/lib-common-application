@@ -83,8 +83,7 @@ import reactor.core.publisher.Mono;
  * 
  * @author Firefly Development Team
  * @since 1.0.0
- * @see AbstractContractController For contract-scoped endpoints
- * @see AbstractProductController For product-scoped endpoints
+ * @see AbstractResourceController For resource endpoints (contract + product required)
  */
 @Slf4j
 public abstract class AbstractApplicationController {
