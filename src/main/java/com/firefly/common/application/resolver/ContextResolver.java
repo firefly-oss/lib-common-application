@@ -36,11 +36,26 @@ public interface ContextResolver {
     
     /**
      * Resolves the complete application context from the request.
+     * This method extracts all IDs automatically (party, tenant, contract, product).
      * 
      * @param exchange the server web exchange
      * @return Mono of resolved AppContext
      */
     Mono<AppContext> resolveContext(ServerWebExchange exchange);
+    
+    /**
+     * Resolves the application context with explicit contractId and productId.
+     * This is the method controllers should use to pass IDs extracted from {@code @PathVariable}.
+     * 
+     * <p>Party and tenant IDs are still extracted from Istio headers (X-Party-Id, X-Tenant-Id),
+     * but contract and product IDs are provided explicitly by the controller.</p>
+     * 
+     * @param exchange the server web exchange
+     * @param contractId the contract ID from {@code @PathVariable} (nullable)
+     * @param productId the product ID from {@code @PathVariable} (nullable)
+     * @return Mono of resolved AppContext
+     */
+    Mono<AppContext> resolveContext(ServerWebExchange exchange, UUID contractId, UUID productId);
     
     /**
      * Resolves the party ID from the request.

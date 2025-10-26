@@ -47,7 +47,7 @@ public abstract class AbstractContextResolver implements ContextResolver {
     
     @Override
     public Mono<AppContext> resolveContext(ServerWebExchange exchange) {
-        log.debug("Resolving application context for request");
+        log.debug("Resolving application context for request (deprecated - use version with explicit IDs)");
         
         return Mono.zip(
                 resolvePartyId(exchange),
@@ -72,6 +72,33 @@ public abstract class AbstractContextResolver implements ContextResolver {
             );
         })
         .doOnSuccess(context -> log.debug("Successfully resolved context for party: {}", context.getPartyId()))
+        .doOnError(error -> log.error("Failed to resolve context", error));
+    }
+    
+    @Override
+    public Mono<AppContext> resolveContext(ServerWebExchange exchange, UUID contractId, UUID productId) {
+        log.debug("Resolving application context with explicit contract: {} and product: {}", contractId, productId);
+        
+        return Mono.zip(
+                resolvePartyId(exchange),
+                resolveTenantId(exchange)
+        )
+        .flatMap(tuple -> {
+            UUID partyId = tuple.getT1();
+            UUID tenantId = tuple.getT2();
+            
+            return enrichContext(
+                    AppContext.builder()
+                            .partyId(partyId)
+                            .tenantId(tenantId)
+                            .contractId(contractId)  // Explicit from controller
+                            .productId(productId)     // Explicit from controller
+                            .build(),
+                    exchange
+            );
+        })
+        .doOnSuccess(context -> log.debug("Successfully resolved context for party: {}, contract: {}, product: {}", 
+                context.getPartyId(), context.getContractId(), context.getProductId()))
         .doOnError(error -> log.error("Failed to resolve context", error));
     }
     
