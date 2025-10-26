@@ -46,7 +46,7 @@ import java.util.Map;
  *       "description": "Orchestrates customer onboarding...",
  *       "domain": "customer",
  *       "team": "customer-experience",
- *       "owners": ["john.doe@firefly.com"],
+ *       "owners": ["john.doe@getfirefly.io"],
  *       "apiBasePath": "/api/v1/onboarding",
  *       "usesServices": ["customer-domain-people", "kyc-provider-api"],
  *       "capabilities": ["Customer Identity Verification", "Document Management"],

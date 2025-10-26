@@ -43,7 +43,7 @@ class FireflyApplicationInfoContributorTest {
         buildInfo.put("git.commit", "abc123");
         buildInfo.put("git.branch", "main");
         
-        Set<String> owners = new HashSet<>(Arrays.asList("owner1@firefly.com", "owner2@firefly.com"));
+        Set<String> owners = new HashSet<>(Arrays.asList("owner1@getfirefly.io", "owner2@getfirefly.io"));
         Set<String> services = new HashSet<>(Arrays.asList("service-1", "service-2"));
         Set<String> capabilities = new HashSet<>(Arrays.asList("capability-1", "capability-2"));
         

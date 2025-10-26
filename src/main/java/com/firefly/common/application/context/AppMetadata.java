@@ -56,7 +56,7 @@ import java.util.Set;
  *     description = "Orchestrates customer onboarding: KYC, document upload, account setup",
  *     domain = "customer",
  *     team = "customer-experience",
- *     owners = {"john.doe@firefly.com"},
+ *     owners = {"john.doe@getfirefly.io"},
  *     apiBasePath = "/api/v1/onboarding",
  *     usesServices = {"customer-domain-people", "kyc-provider-api"},
  *     capabilities = {"Identity Verification", "Document Management"}
@@ -131,7 +131,7 @@ public class AppMetadata {
     
     /**
      * Email addresses of the primary owners/maintainers.
-     * Example: ["john.doe@firefly.com", "jane.smith@firefly.com"]
+     * Example: ["john.doe@getfirefly.io", "jane.smith@getfirefly.io"]
      */
     Set<String> owners;
     

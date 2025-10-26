@@ -22,7 +22,7 @@ class AppMetadataTest {
             .displayName("Test Service")
             .domain("test")
             .team("test-team")
-            .owners(Set.of("owner@firefly.com"))
+            .owners(Set.of("owner@getfirefly.io"))
             .build();
         
         assertEquals("test-service", metadata.getName());
@@ -31,7 +31,7 @@ class AppMetadataTest {
         assertEquals("Test Service", metadata.getDisplayName());
         assertEquals("test", metadata.getDomain());
         assertEquals("test-team", metadata.getTeam());
-        assertTrue(metadata.getOwners().contains("owner@firefly.com"));
+        assertTrue(metadata.getOwners().contains("owner@getfirefly.io"));
     }
     
     @Test

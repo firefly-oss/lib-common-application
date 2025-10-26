@@ -35,7 +35,7 @@ import java.lang.annotation.*;
  *     description = "Orchestrates customer onboarding: KYC verification, document upload, and account setup",
  *     domain = "customer",
  *     team = "customer-experience",
- *     owners = {"john.doe@firefly.com", "jane.smith@firefly.com"},
+ *     owners = {"john.doe@getfirefly.io", "jane.smith@getfirefly.io"},
  *     apiBasePath = "/api/v1/onboarding",
  *     usesServices = {"customer-domain-people", "common-platform-customer-mgmt", "kyc-provider-api"}
  * )

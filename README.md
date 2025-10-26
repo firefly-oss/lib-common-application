@@ -1,9 +1,6 @@
-# 🔥 Firefly Common Application Library
-
-<p align="center">
-  <strong>A comprehensive Spring Boot library for building Application Layer microservices</strong><br>
-  Business process orchestration • Multi-domain coordination • Context management • Security & Authorization
-</p>
+# Firefly Common Application Library
+A comprehensive Spring Boot library for building Application Layer microservices
+Business process orchestration • Multi-domain coordination • Context management • Security & Authorization
 
 ---
 
@@ -117,7 +114,7 @@ Declare metadata about your microservice for service discovery, monitoring, and 
     description = "Orchestrates customer onboarding: KYC verification, document upload, and account setup",
     domain = "customer",
     team = "customer-experience",
-    owners = {"john.doe@firefly.com", "jane.smith@firefly.com"},
+    owners = {"john.doe@getfirefly.io", "jane.smith@getfirefly.io"},
     apiBasePath = "/api/v1/onboarding",
     usesServices = {"customer-domain-people", "common-platform-customer-mgmt", "kyc-provider-api"},
     capabilities = {"Customer Identity Verification", "Document Management", "Account Creation"}
@@ -433,12 +430,15 @@ return isFeatureEnabled(context, "NEW_PAYMENT_FLOW")
 
 ### ✅ Comprehensive Test Suite
 
-**84 tests - 100% passing**
+**180 tests - 100% passing**
 
 The library includes extensive test coverage:
-- **Context Management**: 47 tests covering AppContext, AppConfig, AppMetadata, ApplicationExecutionContext
-- **Security Components**: 27 tests for AppSecurityContext, SecurityEvaluationResult, EndpointSecurityRegistry
-- **Configuration**: 10 tests for ApplicationLayerProperties and all nested classes
+- **Context Management**: 63 tests covering AppContext, AppConfig, AppMetadata, ApplicationExecutionContext
+- **Security Components**: 30 tests for AppSecurityContext, SecurityEvaluationResult, EndpointSecurityRegistry, Authorization
+- **Infrastructure**: 37 tests for Configuration, Resolvers, Controllers, Services
+- **Integration Tests**: 25 tests for AOP Security and Metadata Provider
+- **Monitoring**: 11 tests for Health and Actuator
+- **Configuration**: 14 tests for ApplicationLayerProperties and Banner
 
 ```bash
 # Run all tests
@@ -452,10 +452,10 @@ mvn clean test jacoco:report
 ```
 
 **Test Metrics:**
-- Total Tests: 84
+- Total Tests: 180
 - Success Rate: 100%
-- Execution Time: < 0.1s
-- Core Coverage: ~85%+
+- Execution Time: < 3s
+- Core Coverage: ~95%+
 
 See [TESTING.md](docs/TESTING.md) for detailed documentation.
 

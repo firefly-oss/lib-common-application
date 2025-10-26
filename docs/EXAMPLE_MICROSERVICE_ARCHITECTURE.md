@@ -320,7 +320,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
     description = "Orchestrates complete customer onboarding: KYC, documents, contracts, and accounts",
     domain = "customer",
     team = "customer-experience",
-    owners = {"john.doe@firefly.com", "jane.smith@firefly.com"},
+    owners = {"john.doe@getfirefly.io", "jane.smith@getfirefly.io"},
     apiBasePath = "/api/v1/onboarding",
     usesServices = {
         "customer-domain-people",
