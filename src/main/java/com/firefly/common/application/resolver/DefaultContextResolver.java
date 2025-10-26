@@ -17,7 +17,11 @@
 package com.firefly.common.application.resolver;
 
 import com.firefly.common.application.context.AppContext;
+import com.firefly.common.application.util.SessionContextMapper;
+import com.firefly.security.center.session.FireflySessionManager;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -104,11 +108,14 @@ import java.util.UUID;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class DefaultContextResolver extends AbstractContextResolver {
+    
+    @Autowired(required = false)
+    private final FireflySessionManager sessionManager;
     
     // TODO: Inject platform SDK clients when available
     // private final ConfigManagementClient configMgmtClient;  // For tenant resolution
-    // private final FireflySessionManager sessionManager;      // For roles/permissions/contract access (Security Center)
     
     @Override
     public Mono<UUID> resolvePartyId(ServerWebExchange exchange) {
@@ -171,28 +178,29 @@ public class DefaultContextResolver extends AbstractContextResolver {
         log.debug("Resolving roles for party: {} in contract: {}, product: {}", 
                 context.getPartyId(), context.getContractId(), context.getProductId());
         
-        // TODO: Implement using FireflySessionManager from Security Center
-        // The session manager knows:
-        // - Which contracts the party has access to
-        // - Which roles the party has in each contract
-        // - Role scopes (contract-level, product-level)
-        /*
-        return sessionManager.getPartySession(context.getPartyId(), context.getTenantId())
-            .flatMap(session -> {
-                // If contract is specified, get contract-specific roles
-                if (context.getContractId() != null) {
-                    return Mono.justOrEmpty(
-                        session.getContractRoles(context.getContractId(), context.getProductId())
-                    );
-                }
-                // Otherwise, return party-level roles (for party-only endpoints)
-                return Mono.just(session.getPartyRoles());
-            });
-        */
+        // Check if FireflySessionManager is available
+        if (sessionManager == null) {
+            log.warn("FireflySessionManager not available - returning empty roles. " +
+                    "Ensure common-platform-security-center is deployed and accessible.");
+            return Mono.just(Set.of());
+        }
         
-        // Temporary: Return empty set until FireflySessionManager integration is complete
-        log.warn("FireflySessionManager integration pending: returning empty roles set");
-        return Mono.just(Set.of());
+        // Use FireflySessionManager to get session with enriched contract/role data
+        return sessionManager.createOrGetSession(exchange)
+            .map(session -> {
+                // Extract roles using SessionContextMapper based on context scope
+                Set<String> roles = SessionContextMapper.extractRoles(
+                    session, 
+                    context.getContractId(), 
+                    context.getProductId()
+                );
+                
+                log.debug("Resolved {} roles for party {}: {}", roles.size(), context.getPartyId(), roles);
+                return roles;
+            })
+            .doOnError(error -> log.error("Failed to resolve roles from FireflySessionManager: {}", 
+                    error.getMessage(), error))
+            .onErrorReturn(Set.of()); // Graceful degradation on error
     }
     
     @Override
@@ -200,29 +208,30 @@ public class DefaultContextResolver extends AbstractContextResolver {
         log.debug("Resolving permissions for party: {} in contract: {}, product: {}", 
                 context.getPartyId(), context.getContractId(), context.getProductId());
         
-        // TODO: Implement using FireflySessionManager from Security Center
-        // Permissions are derived from roles defined in the session
-        // The session manager provides role-to-permission mappings
-        /*
-        return sessionManager.getPartySession(context.getPartyId(), context.getTenantId())
-            .flatMap(session -> {
-                Set<String> roles;
-                
-                // Get roles based on scope
-                if (context.getContractId() != null) {
-                    roles = session.getContractRoles(context.getContractId(), context.getProductId());
-                } else {
-                    roles = session.getPartyRoles();
-                }
-                
-                // Convert roles to permissions using session manager's mapping
-                return Mono.just(session.getPermissionsForRoles(roles));
-            });
-        */
+        // Check if FireflySessionManager is available
+        if (sessionManager == null) {
+            log.warn("FireflySessionManager not available - returning empty permissions. " +
+                    "Ensure common-platform-security-center is deployed and accessible.");
+            return Mono.just(Set.of());
+        }
         
-        // Temporary: Return empty set until FireflySessionManager integration is complete
-        log.warn("FireflySessionManager integration pending: returning empty permissions set");
-        return Mono.just(Set.of());
+        // Use FireflySessionManager to get session with enriched contract/role/permission data
+        return sessionManager.createOrGetSession(exchange)
+            .map(session -> {
+                // Extract permissions from role scopes using SessionContextMapper
+                Set<String> permissions = SessionContextMapper.extractPermissions(
+                    session, 
+                    context.getContractId(), 
+                    context.getProductId()
+                );
+                
+                log.debug("Resolved {} permissions for party {}: {}", 
+                        permissions.size(), context.getPartyId(), permissions);
+                return permissions;
+            })
+            .doOnError(error -> log.error("Failed to resolve permissions from FireflySessionManager: {}", 
+                    error.getMessage(), error))
+            .onErrorReturn(Set.of()); // Graceful degradation on error
     }
     
     @Override
