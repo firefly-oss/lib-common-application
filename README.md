@@ -627,6 +627,10 @@ The library integrates with `lib-common-cache` (FireflyCacheManager) to provide 
   - Feature flags
   - Multi-tenant settings
 
+**Cache Key Format**: `firefly:application:config:{tenantId}`
+- Example: `firefly:application:config:123e4567-e89b-12d3-a456-426614174000`
+- Follows Firefly naming conventions for proper namespace organization
+
 ### ⚙️ Cache Configuration
 
 Caching is configured via `application.yml` and auto-configured by `lib-common-cache`:
@@ -642,10 +646,10 @@ firefly:
     caffeine:
       cache-name: application-layer
       enabled: true
-      key-prefix: "firefly:app"     # Prefix for all cache keys
-      maximum-size: 1000            # Maximum cached configurations
-      expire-after-write: PT1H      # Tenant configs expire after 1 hour
-      record-stats: true            # Enable cache statistics
+      key-prefix: "firefly:application"  # Prefix for all cache keys (Firefly naming convention)
+      maximum-size: 1000                 # Maximum cached configurations
+      expire-after-write: PT1H           # Tenant configs expire after 1 hour
+      record-stats: true                 # Enable cache statistics
 ```
 
 ### 🔄 Cache Behavior

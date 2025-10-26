@@ -13,10 +13,10 @@ firefly:
     caffeine:
       cache-name: application-layer
       enabled: true
-      key-prefix: "firefly:app"  # Prefix for all cache keys
-      maximum-size: 1000         # Maximum number of cached configurations
-      expire-after-write: PT1H   # Tenant configs expire after 1 hour
-      record-stats: true         # Enable cache statistics
+      key-prefix: "firefly:application"  # Prefix for all cache keys (follows Firefly naming conventions)
+      maximum-size: 1000                 # Maximum number of cached configurations
+      expire-after-write: PT1H           # Tenant configs expire after 1 hour
+      record-stats: true                 # Enable cache statistics
 
 # Actuator Configuration
 management:

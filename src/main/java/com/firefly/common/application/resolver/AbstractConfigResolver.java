@@ -38,7 +38,7 @@ import java.util.UUID;
 @Slf4j
 public abstract class AbstractConfigResolver implements ConfigResolver {
     
-    private static final String CACHE_KEY_PREFIX = "tenant:config:";
+    private static final String CACHE_KEY_PREFIX = "firefly:application:config:";
     private static final Duration DEFAULT_CONFIG_TTL = Duration.ofHours(1);
     
     @Autowired(required = false)
@@ -175,10 +175,16 @@ public abstract class AbstractConfigResolver implements ConfigResolver {
     }
     
     /**
-     * Gets the cache key for a tenant.
+     * Gets the cache key for a tenant configuration.
+     * 
+     * <p>Cache keys follow the Firefly naming convention:</p>
+     * <ul>
+     *   <li>Format: {@code firefly:application:config:{tenantId}}</li>
+     *   <li>Example: {@code firefly:application:config:123e4567-e89b-12d3-a456-426614174000}</li>
+     * </ul>
      * 
      * @param tenantId the tenant ID
-     * @return the cache key
+     * @return the cache key following Firefly conventions
      */
     private String getCacheKey(UUID tenantId) {
         return CACHE_KEY_PREFIX + tenantId.toString();
