@@ -331,11 +331,12 @@ public class CustomAuthorizationService extends AbstractSecurityAuthorizationSer
 **Purpose:** Base class for application services that orchestrate business processes.
 
 **Provides helper methods:**
-- `resolveExecutionContext(ServerWebExchange)` - Gets full context automatically
-- `validateContext(context, requireContract, requireProduct)` - Validates required IDs
-- `requireRole(context, role)` / `requirePermission(context, permission)` - Authorization helpers
-- `getProvider(context, providerName)` - Access provider configuration
-- `isFeatureEnabled(context, featureName)` - Check feature flags
+- `resolveExecutionContext(ServerWebExchange)` - Resolves full ApplicationExecutionContext
+- `validateContext(context, requireContract, requireProduct)` - Validates required IDs  
+- `requireRole(context, role)` - Throws AccessDeniedException if role missing
+- `requirePermission(context, permission)` - Throws AccessDeniedException if permission missing
+- `getProviderConfig(context, providerType)` - Gets provider configuration (KYC, payment gateway, etc.)
+- `isFeatureEnabled(context, feature)` - Checks if feature flag is enabled
 
 ```java
 @Service
@@ -344,16 +345,28 @@ public class CustomerOnboardingService extends AbstractApplicationService {
     private final CustomerDomainService customerDomain;
     private final KycProviderService kycProvider;
     
+    // Constructor with required AbstractApplicationService dependencies
+    public CustomerOnboardingService(
+            ContextResolver contextResolver,
+            ConfigResolver configResolver,
+            SecurityAuthorizationService authorizationService,
+            CustomerDomainService customerDomain,
+            KycProviderService kycProvider) {
+        super(contextResolver, configResolver, authorizationService);
+        this.customerDomain = customerDomain;
+        this.kycProvider = kycProvider;
+    }
+    
     public Mono<Customer> onboardCustomer(ServerWebExchange exchange, OnboardingRequest request) {
         return resolveExecutionContext(exchange)
-            // Validate we have partyId and tenantId
+            // Validate we have partyId and tenantId (no contract/product required)
             .flatMap(ctx -> validateContext(ctx, false, false))
             
             // Check permission
             .flatMap(ctx -> requirePermission(ctx, "CREATE_CUSTOMER")
                 .thenReturn(ctx))
             
-            // Orchestrate business process
+            // Orchestrate business process: KYC → Domain Service
             .flatMap(ctx -> 
                 kycProvider.verify(ctx, request)
                     .flatMap(kycResult -> customerDomain.createCustomer(ctx, request, kycResult))
@@ -366,28 +379,76 @@ public class CustomerOnboardingService extends AbstractApplicationService {
 
 #### Optional: AbstractContractController / AbstractProductController
 
-**Purpose:** Base controllers that automatically extract contract/product IDs from path.
+**Purpose:** Base controllers that provide helper methods for validating contract/product IDs.
+
+**What they provide:**
+- `AbstractContractController`: Validation and logging for contract-scoped endpoints
+- `AbstractProductController`: Validation and logging for contract + product endpoints
+
+**Example with AbstractContractController:**
 
 ```java
 @RestController
-@RequestMapping("/api/v1/contracts")
-public class TransferController extends AbstractContractController {
+@RequestMapping("/api/v1/contracts/{contractId}/accounts")
+public class AccountController extends AbstractContractController {
     
-    @PostMapping("/{contractId}/transfer")
-    public Mono<Transfer> transfer(
+    @Autowired
+    private AccountApplicationService accountService;
+    
+    @GetMapping
+    @Secure(roles = "ACCOUNT_VIEWER")
+    public Mono<List<AccountDto>> listAccounts(
             @PathVariable UUID contractId,
-            @RequestBody TransferRequest request,
             ServerWebExchange exchange) {
         
-        // withContractContext() automatically:
-        // 1. Resolves full context
-        // 2. Sets contractId from path variable
-        // 3. Passes enriched context to your lambda
-        return withContractContext(contractId, exchange,
-            context -> transferService.execute(context, request));
+        // Validate contractId is present (throws exception if null)
+        requireContractId(contractId);
+        
+        // Optional: Log the operation for debugging
+        logOperation(contractId, "listAccounts");
+        
+        return accountService.listAccountsByContract(exchange, contractId);
     }
 }
 ```
+
+**Example with AbstractProductController:**
+
+```java
+@RestController
+@RequestMapping("/api/v1/contracts/{contractId}/products/{productId}/transactions")
+public class TransactionController extends AbstractProductController {
+    
+    @Autowired
+    private TransactionApplicationService transactionService;
+    
+    @GetMapping
+    @Secure(roles = "TRANSACTION_VIEWER")
+    public Mono<List<TransactionDto>> listTransactions(
+            @PathVariable UUID contractId,
+            @PathVariable UUID productId,
+            ServerWebExchange exchange) {
+        
+        // Validate both IDs are present
+        requireContext(contractId, productId);
+        
+        // Optional: Log the operation
+        logOperation(contractId, productId, "listTransactions");
+        
+        return transactionService.listTransactions(exchange, contractId, productId);
+    }
+}
+```
+
+**Available methods:**
+- `requireContractId(UUID)` - Validates contractId is not null
+- `requireProductId(UUID)` - Validates productId is not null  
+- `requireContext(UUID, UUID)` - Validates both contractId and productId
+- `logOperation(...)` - Logs operation with contract/product context
+
+**Note:** These are **completely optional** helper classes. Use them only if they help you.
+
+---
 
 ### 4. Use Security Annotations
 
