@@ -16,6 +16,7 @@ Business process orchestration • Multi-domain coordination • Context managem
 - [📚 Complete Documentation](#-complete-documentation)
 - [Examples](#examples)
 - [Configuration](#configuration)
+- [Caching](#caching)
 - [Testing](#testing)
 - [Performance & Monitoring](#performance--monitoring)
 - [Contributing](#contributing)
@@ -613,6 +614,122 @@ firefly:
       cache-ttl: 600                   # Cache TTL (seconds)
       refresh-on-startup: false       # Refresh on startup
 ```
+
+## Caching
+
+The library integrates with `lib-common-cache` (FireflyCacheManager) to provide efficient tenant configuration caching.
+
+### 📦 What's Cached?
+
+- **Tenant Configurations**: Cached with 1-hour TTL (configurable)
+  - Tenant settings
+  - Provider configurations (KYC, payment gateways)
+  - Feature flags
+  - Multi-tenant settings
+
+### ⚙️ Cache Configuration
+
+Caching is configured via `application.yml` and auto-configured by `lib-common-cache`:
+
+```yaml
+firefly:
+  cache:
+    enabled: true
+    default-cache-type: CAFFEINE  # Use Caffeine (in-memory) by default
+    metrics-enabled: true
+    health-enabled: true
+    
+    caffeine:
+      cache-name: application-layer
+      enabled: true
+      key-prefix: "firefly:app"     # Prefix for all cache keys
+      maximum-size: 1000            # Maximum cached configurations
+      expire-after-write: PT1H      # Tenant configs expire after 1 hour
+      record-stats: true            # Enable cache statistics
+```
+
+### 🔄 Cache Behavior
+
+**With FireflyCacheManager Available:**
+- ✅ Tenant configs cached with TTL
+- ✅ Automatic eviction policies
+- ✅ Cache statistics and monitoring
+- ✅ Support for distributed caching (Redis)
+
+**Without FireflyCacheManager (Graceful Degradation):**
+- ⚠️ Caching disabled - fetches from platform every time
+- ✅ Service continues to function normally
+- ⚠️ Higher latency and platform load
+
+### 🚀 Cache Operations
+
+**Manual Cache Control:**
+
+```java
+@Service
+public class ConfigManagementService {
+    
+    @Autowired
+    private ConfigResolver configResolver;
+    
+    // Refresh config for specific tenant
+    public Mono<AppConfig> refreshTenantConfig(UUID tenantId) {
+        return configResolver.refreshConfig(tenantId);
+    }
+    
+    // Check if tenant config is cached
+    public Mono<Boolean> isConfigCached(UUID tenantId) {
+        return configResolver.isCached(tenantId);
+    }
+}
+```
+
+### 📊 Cache Monitoring
+
+Cache metrics are exposed via Spring Boot Actuator:
+
+```bash
+# View cache health
+GET /actuator/health/cache
+
+# View cache statistics
+GET /actuator/caches
+
+# View cache metrics
+GET /actuator/metrics/cache.gets
+GET /actuator/metrics/cache.evictions
+```
+
+### 🔧 Custom TTL
+
+You can customize cache TTL per resolver:
+
+```java
+public class CustomConfigResolver extends AbstractConfigResolver {
+    
+    @Override
+    protected Duration getConfigTTL() {
+        // Custom TTL: 30 minutes instead of default 1 hour
+        return Duration.ofMinutes(30);
+    }
+    
+    @Override
+    protected Mono<AppConfig> fetchConfigFromPlatform(UUID tenantId) {
+        // Your platform integration
+        return configClient.getTenantConfig(tenantId);
+    }
+}
+```
+
+### 💡 Best Practices
+
+1. **Use Caffeine for Single-Instance Apps**: Fast in-memory caching
+2. **Use Redis for Distributed Apps**: Shared cache across instances
+3. **Monitor Cache Hit Rates**: Optimize TTL based on hit/miss ratios
+4. **Set Appropriate TTL**: Balance freshness vs performance
+5. **Enable Cache Statistics**: Track cache effectiveness
+
+For more details, see [lib-common-cache documentation](../lib-common-cache/README.md).
 
 ## Examples
 

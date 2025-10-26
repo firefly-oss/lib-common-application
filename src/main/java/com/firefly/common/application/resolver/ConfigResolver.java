@@ -50,7 +50,7 @@ public interface ConfigResolver {
      * Checks if configuration is cached for a tenant.
      * 
      * @param tenantId the tenant ID
-     * @return true if configuration is cached
+     * @return Mono that emits true if configuration is cached
      */
-    boolean isCached(UUID tenantId);
+    Mono<Boolean> isCached(UUID tenantId);
 }

@@ -17,19 +17,20 @@
 package com.firefly.common.application.resolver;
 
 import com.firefly.common.application.context.AppConfig;
+import com.firefly.common.cache.manager.FireflyCacheManager;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import reactor.core.publisher.Mono;
 
-import java.util.Map;
+import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Abstract base implementation of ConfigResolver with caching support.
+ * Abstract base implementation of ConfigResolver with caching support using FireflyCacheManager.
  * Integrates with common-platform-config-mgmt-sdk to fetch tenant configuration.
  * 
- * <p>This implementation provides a simple in-memory cache for configuration data.
- * Subclasses can override caching behavior or use external cache implementations.</p>
+ * <p>This implementation uses FireflyCacheManager from lib-common-cache for distributed
+ * caching support with TTL and proper eviction policies.</p>
  * 
  * @author Firefly Development Team
  * @since 1.0.0
@@ -37,40 +38,71 @@ import java.util.concurrent.ConcurrentHashMap;
 @Slf4j
 public abstract class AbstractConfigResolver implements ConfigResolver {
     
-    private final Map<UUID, AppConfig> configCache = new ConcurrentHashMap<>();
+    private static final String CACHE_KEY_PREFIX = "tenant:config:";
+    private static final Duration DEFAULT_CONFIG_TTL = Duration.ofHours(1);
+    
+    @Autowired(required = false)
+    private FireflyCacheManager cacheManager;
     
     @Override
     public Mono<AppConfig> resolveConfig(UUID tenantId) {
         log.debug("Resolving configuration for tenant: {}", tenantId);
         
-        // Check cache first
-        AppConfig cached = configCache.get(tenantId);
-        if (cached != null) {
-            log.debug("Configuration found in cache for tenant: {}", tenantId);
-            return Mono.just(cached);
+        // If cache is not available, fetch directly
+        if (cacheManager == null) {
+            log.debug("FireflyCacheManager not available, fetching config directly");
+            return fetchConfigFromPlatform(tenantId);
         }
         
-        // Fetch from platform
-        return fetchConfigFromPlatform(tenantId)
-                .doOnSuccess(config -> {
-                    configCache.put(tenantId, config);
-                    log.debug("Cached configuration for tenant: {}", tenantId);
-                })
-                .doOnError(error -> log.error("Failed to resolve config for tenant: {}", tenantId, error));
+        String cacheKey = getCacheKey(tenantId);
+        
+        // Check cache first
+        return cacheManager.get(cacheKey, AppConfig.class)
+                .flatMap(cached -> {
+                    if (cached.isPresent()) {
+                        log.debug("Configuration found in cache for tenant: {}", tenantId);
+                        return Mono.just(cached.get());
+                    }
+                    
+                    // Cache miss - fetch from platform and cache
+                    return fetchConfigFromPlatform(tenantId)
+                            .flatMap(config -> cacheManager.put(cacheKey, config, getConfigTTL())
+                                    .doOnSuccess(v -> log.debug("Cached configuration for tenant: {} with TTL: {}", 
+                                            tenantId, getConfigTTL()))
+                                    .thenReturn(config))
+                            .doOnError(error -> log.error("Failed to resolve config for tenant: {}", tenantId, error));
+                });
     }
     
     @Override
     public Mono<AppConfig> refreshConfig(UUID tenantId) {
         log.debug("Refreshing configuration for tenant: {}", tenantId);
         
-        // Remove from cache and fetch fresh
-        configCache.remove(tenantId);
-        return resolveConfig(tenantId);
+        if (cacheManager == null) {
+            log.debug("FireflyCacheManager not available, fetching config directly");
+            return fetchConfigFromPlatform(tenantId);
+        }
+        
+        String cacheKey = getCacheKey(tenantId);
+        
+        // Evict from cache and fetch fresh
+        return cacheManager.evict(cacheKey)
+                .doOnNext(evicted -> {
+                    if (evicted) {
+                        log.debug("Evicted cached configuration for tenant: {}", tenantId);
+                    }
+                })
+                .then(resolveConfig(tenantId));
     }
     
     @Override
-    public boolean isCached(UUID tenantId) {
-        return configCache.containsKey(tenantId);
+    public Mono<Boolean> isCached(UUID tenantId) {
+        if (cacheManager == null) {
+            return Mono.just(false);
+        }
+        
+        String cacheKey = getCacheKey(tenantId);
+        return cacheManager.exists(cacheKey);
     }
     
     /**
@@ -107,19 +139,58 @@ public abstract class AbstractConfigResolver implements ConfigResolver {
     /**
      * Clears the entire configuration cache.
      * Useful for testing or when a full refresh is needed.
+     * 
+     * @return Mono that completes when cache is cleared
      */
-    protected void clearCache() {
-        configCache.clear();
-        log.info("Configuration cache cleared");
+    protected Mono<Void> clearCache() {
+        if (cacheManager == null) {
+            log.debug("FireflyCacheManager not available, nothing to clear");
+            return Mono.empty();
+        }
+        
+        return cacheManager.clear()
+                .doOnSuccess(v -> log.info("Configuration cache cleared"));
     }
     
     /**
      * Clears cache for a specific tenant.
      * 
      * @param tenantId the tenant ID
+     * @return Mono that completes when cache entry is evicted
      */
-    protected void clearCacheForTenant(UUID tenantId) {
-        configCache.remove(tenantId);
-        log.debug("Configuration cache cleared for tenant: {}", tenantId);
+    protected Mono<Void> clearCacheForTenant(UUID tenantId) {
+        if (cacheManager == null) {
+            log.debug("FireflyCacheManager not available, nothing to clear");
+            return Mono.empty();
+        }
+        
+        String cacheKey = getCacheKey(tenantId);
+        return cacheManager.evict(cacheKey)
+                .doOnNext(evicted -> {
+                    if (evicted) {
+                        log.debug("Configuration cache cleared for tenant: {}", tenantId);
+                    }
+                })
+                .then();
+    }
+    
+    /**
+     * Gets the cache key for a tenant.
+     * 
+     * @param tenantId the tenant ID
+     * @return the cache key
+     */
+    private String getCacheKey(UUID tenantId) {
+        return CACHE_KEY_PREFIX + tenantId.toString();
+    }
+    
+    /**
+     * Gets the TTL duration for cached configurations.
+     * Subclasses can override this to provide custom TTL values.
+     * 
+     * @return the TTL duration
+     */
+    protected Duration getConfigTTL() {
+        return DEFAULT_CONFIG_TTL;
     }
 }
