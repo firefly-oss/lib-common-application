@@ -86,7 +86,7 @@ import java.util.UUID;
  * 
  * @author Firefly Development Team
  * @since 1.0.0
- * @see AbstractPartyController For party-only endpoints
+ * @see AbstractApplicationController For application-layer endpoints
  * @see AbstractProductController For product-scoped endpoints
  */
 @Slf4j

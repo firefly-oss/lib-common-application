@@ -79,13 +79,13 @@ Channels (Web/Mobile/Apps)
 - **Configuration**: Multi-tenant configuration management with provider settings
 - **Business Process Orchestration**: Coordinating domain services to fulfill business operations
 
-## Architecture Complete – Controller-Based Context Resolution!
+### Architecture Complete – Controller-Based Context Resolution!
 
 This library provides a **fully integrated, controller-based** application layer:
 - ✅ **@FireflyApplication** annotation for application metadata and service discovery
 - ✅ **Context Architecture** (AppContext, AppConfig, AppSecurityContext, ApplicationExecutionContext)
 - ✅ **@Secure Annotation** system for declarative security
-- ✅ **🎯 Three Base Controllers** – `AbstractPartyController`, `AbstractContractController`, `AbstractProductController`
+- ✅ **🎯 Three Base Controllers** – `AbstractApplicationController`, `AbstractContractController`, `AbstractProductController`
 - ✅ **🎯 Automatic Context Resolution** – Party/Tenant from Istio headers + Contract/Product from path variables
 - ✅ **🎯 Default Config Resolver** – Fetches tenant configuration automatically
 - ✅ **🎯 Default Security Authorization** – Validates roles/permissions automatically
@@ -201,33 +201,33 @@ public class MyServiceApplication {
 
 ```
 ┌──────────────────────────────────────────────────┐
-│        Istio Gateway (Authentication)                  │
-│  - Validates JWT                                      │
-│  - Injects X-Party-Id header (from JWT sub)          │
-└──────────────────────┬──────────────────────────┘
+│        Istio Gateway (Authentication)            │
+│  - Validates JWT                                 │
+│  - Injects X-Party-Id header (from JWT sub)      │
+└──────────────────────┬───────────────────────────┘
                          │
                          ↓
 ┌──────────────────────────────────────────────────┐
-│        Your Controller (Extracts Path Variables)       │
-│  - Extends AbstractPartyController                    │
-│    OR AbstractContractController                      │
-│    OR AbstractProductController                       │
-│  - Extracts contractId from @PathVariable (if needed) │
-│  - Extracts productId from @PathVariable (if needed)  │
-│  - Calls resolveExecutionContext(exchange, ...)       │
-└──────────────────────┬──────────────────────────┘
+│        Your Controller (Extracts Path Variables) │
+│  - Extends AbstractApplicationController         │
+│    OR AbstractContractController                 │
+│    OR AbstractProductController                  │
+│  - Extracts contractId from @PathVariable        │
+│  - Extracts productId from @PathVariable         │
+│  - Calls resolveExecutionContext(exchange, ...)  │
+└──────────────────────┬───────────────────────────┘
                          │
                          ↓
 ┌──────────────────────────────────────────────────┐
-│        DefaultContextResolver (Library)                │
-│  1. Extracts partyId from X-Party-Id header          │
-│  2. Calls config-mgmt to get tenantId (by partyId)  │
-│  3. Uses contractId/productId from controller        │
-│  4. Calls FireflySessionManager (Security Center)    │
-│     - Get party session (contracts, roles, scopes)   │
-│     - Validate contract access                       │
-│     - Get roles for contract/product                 │
-│     - Derive permissions from roles                  │
+│        DefaultContextResolver (Library)          │
+│  1. Extracts partyId from X-Party-Id header      │
+│  2. Calls config-mgmt to get tenantId(by partyId)│
+│  3. Uses contractId/productId from controller    │
+│  4. Calls FireflySessionManager (Security Center)│
+│     - Get party session (contracts,roles,scopes) │
+│     - Validate contract access                   │
+│     - Get roles for contract/product             │
+│     - Derive permissions from roles              │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -239,14 +239,14 @@ public class MyServiceApplication {
 - ✅ **Library resolves full context** → Party + Tenant + Contract + Product + Roles + Permissions + Config
 - ✅ **@Secure / EndpointSecurityRegistry** → Validates authorization using resolved context
 
-#### 🎯 Option 1: Party-Only Endpoints (Onboarding, Product Catalog)
+#### 🎯 Option 1: Application-Layer Endpoints (Onboarding, Product Catalog)
 
-Use `AbstractPartyController` for endpoints that don't require contract or product context:
+Use `AbstractApplicationController` for endpoints that don't require contract or product context:
 
 ```java
 @RestController
 @RequestMapping("/api/v1/onboarding")
-public class OnboardingController extends AbstractPartyController {
+public class OnboardingController extends AbstractApplicationController {
     
     @Autowired
     private OnboardingApplicationService onboardingService;
@@ -516,8 +516,8 @@ public class TransactionController extends AbstractProductController {
 - **Tenant Resolution**: `tenantId` resolved by calling `common-platform-config-mgmt` with partyId
 - **Path Variable Extraction**: `contractId` and `productId` extracted from `@PathVariable` in controllers
 - **Automatic Enrichment**: Roles and permissions fetched from platform SDKs based on party+contract+product
-- **Three Controller Types**: `AbstractPartyController`, `AbstractContractController`, `AbstractProductController`
-- **Flexible Scoping**: Support party-only, party+contract, and party+contract+product contexts
+- **Three Controller Types**: `AbstractApplicationController`, `AbstractContractController`, `AbstractProductController`
+- **Flexible Scoping**: Support application-layer, party+contract, and party+contract+product contexts
 - **Caching**: Built-in caching for performance optimization
 - **Immutability**: Thread-safe context objects
 

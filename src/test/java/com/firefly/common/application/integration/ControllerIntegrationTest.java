@@ -19,8 +19,8 @@ package com.firefly.common.application.integration;
 import com.firefly.common.application.context.AppConfig;
 import com.firefly.common.application.context.AppContext;
 import com.firefly.common.application.context.ApplicationExecutionContext;
+import com.firefly.common.application.controller.AbstractApplicationController;
 import com.firefly.common.application.controller.AbstractContractController;
-import com.firefly.common.application.controller.AbstractPartyController;
 import com.firefly.common.application.controller.AbstractProductController;
 import com.firefly.common.application.resolver.ConfigResolver;
 import com.firefly.common.application.resolver.ContextResolver;
@@ -49,7 +49,7 @@ import static org.mockito.Mockito.when;
 
 /**
  * Integration test demonstrating all three controller types:
- * - AbstractPartyController (party-only, no contract/product)
+ * - AbstractApplicationController (application-layer, no contract/product)
  * - AbstractContractController (party + contract)
  * - AbstractProductController (party + contract + product)
  * 
@@ -81,7 +81,7 @@ class ControllerIntegrationTest {
     private UUID testContractId;
     private UUID testProductId;
     
-    private TestPartyController partyController;
+    private TestApplicationController applicationController;
     private TestContractController contractController;
     private TestProductController productController;
     
@@ -93,13 +93,13 @@ class ControllerIntegrationTest {
         testProductId = UUID.randomUUID();
         
         // Setup controllers
-        partyController = new TestPartyController();
+        applicationController = new TestApplicationController();
         contractController = new TestContractController();
         productController = new TestProductController();
         
         // Inject dependencies
-        ReflectionTestUtils.setField(partyController, "contextResolver", contextResolver);
-        ReflectionTestUtils.setField(partyController, "configResolver", configResolver);
+        ReflectionTestUtils.setField(applicationController, "contextResolver", contextResolver);
+        ReflectionTestUtils.setField(applicationController, "configResolver", configResolver);
         ReflectionTestUtils.setField(contractController, "contextResolver", contextResolver);
         ReflectionTestUtils.setField(contractController, "configResolver", configResolver);
         ReflectionTestUtils.setField(productController, "contextResolver", contextResolver);
@@ -107,8 +107,8 @@ class ControllerIntegrationTest {
     }
     
     @Test
-    @DisplayName("Scenario 1: Party-only endpoint (Onboarding)")
-    void testPartyOnlyEndpoint() {
+    @DisplayName("Scenario 1: Application-layer endpoint (Onboarding)")
+    void testApplicationLayerEndpoint() {
         // Given: Onboarding endpoint with only party context
         AppContext appContext = AppContext.builder()
                 .partyId(testPartyId)
@@ -129,8 +129,8 @@ class ControllerIntegrationTest {
         when(configResolver.resolveConfig(testTenantId))
                 .thenReturn(Mono.just(appConfig));
         
-        // When: Call party-only controller endpoint
-        Mono<ApplicationExecutionContext> result = partyController.handleOnboarding(exchange);
+        // When: Call application-layer controller endpoint
+        Mono<ApplicationExecutionContext> result = applicationController.handleOnboarding(exchange);
         
         // Then: Context is resolved with party + tenant only
         StepVerifier.create(result)
@@ -247,7 +247,7 @@ class ControllerIntegrationTest {
         when(configResolver.resolveConfig(testTenantId))
                 .thenReturn(Mono.just(config));
         
-        StepVerifier.create(partyController.handleOnboarding(exchange))
+        StepVerifier.create(applicationController.handleOnboarding(exchange))
                 .assertNext(ctx -> assertThat(ctx.getContext().getContractId()).isNull())
                 .verifyComplete();
         
@@ -291,7 +291,7 @@ class ControllerIntegrationTest {
     
     // Test controller implementations
     
-    static class TestPartyController extends AbstractPartyController {
+    static class TestApplicationController extends AbstractApplicationController {
         public Mono<ApplicationExecutionContext> handleOnboarding(ServerWebExchange exchange) {
             return resolveExecutionContext(exchange);
         }

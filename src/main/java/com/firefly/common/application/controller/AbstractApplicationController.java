@@ -25,9 +25,9 @@ import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
 /**
- * <h1>Abstract Base Controller for Party-Only Endpoints</h1>
+ * <h1>Abstract Base Controller for Application-Layer Endpoints</h1>
  * 
- * <p>This base class is for controllers that operate on <strong>party-level resources</strong>
+ * <p>This base class is for controllers that operate on <strong>application-level resources</strong>
  * without requiring a contract or product context. Perfect for onboarding, product catalogs,
  * or any operation that only needs the authenticated party identity.</p>
  * 
@@ -54,7 +54,7 @@ import reactor.core.publisher.Mono;
  * {@code
  * @RestController
  * @RequestMapping("/api/v1/onboarding")
- * public class OnboardingController extends AbstractPartyController {
+ * public class OnboardingController extends AbstractApplicationController {
  *     
  *     @Autowired
  *     private OnboardingApplicationService onboardingService;
@@ -87,7 +87,7 @@ import reactor.core.publisher.Mono;
  * @see AbstractProductController For product-scoped endpoints
  */
 @Slf4j
-public abstract class AbstractPartyController {
+public abstract class AbstractApplicationController {
     
     @Autowired
     private ContextResolver contextResolver;
@@ -96,7 +96,7 @@ public abstract class AbstractPartyController {
     private ConfigResolver configResolver;
     
     /**
-     * Resolves the full application execution context for party-only endpoints.
+     * Resolves the full application execution context for application-layer endpoints.
      * 
      * <p>This method:</p>
      * <ol>
@@ -107,18 +107,18 @@ public abstract class AbstractPartyController {
      * </ol>
      * 
      * <p><strong>Note:</strong> Contract and product IDs will be <code>null</code>
-     * since this is a party-only endpoint.</p>
+     * since this is an application-layer endpoint.</p>
      * 
      * @param exchange the server web exchange
      * @return Mono of ApplicationExecutionContext with party and tenant context
      */
     protected Mono<ApplicationExecutionContext> resolveExecutionContext(ServerWebExchange exchange) {
-        log.debug("Resolving party-only execution context (no contract/product)");
+        log.debug("Resolving application-layer execution context (no contract/product)");
         
-        // Pass null for contract and product since this is party-only
+        // Pass null for contract and product since this is application-layer only
         return contextResolver.resolveContext(exchange, null, null)
                 .flatMap(appContext -> {
-                    log.debug("Resolved party context: party={}, tenant={}", 
+                    log.debug("Resolved application context: party={}, tenant={}", 
                             appContext.getPartyId(), appContext.getTenantId());
                     
                     return configResolver.resolveConfig(appContext.getTenantId())
@@ -127,8 +127,8 @@ public abstract class AbstractPartyController {
                                     .config(appConfig)
                                     .build());
                 })
-                .doOnSuccess(ctx -> log.debug("Successfully resolved party-only execution context"))
-                .doOnError(error -> log.error("Failed to resolve party-only execution context", error));
+                .doOnSuccess(ctx -> log.debug("Successfully resolved application-layer execution context"))
+                .doOnError(error -> log.error("Failed to resolve application-layer execution context", error));
     }
     
     /**

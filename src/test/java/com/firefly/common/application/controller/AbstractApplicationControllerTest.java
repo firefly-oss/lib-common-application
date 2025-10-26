@@ -42,11 +42,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for AbstractPartyController.
- * Tests party-only context resolution (no contract or product).
+ * Unit tests for AbstractApplicationController.
+ * Tests application-layer context resolution (no contract or product).
  */
 @ExtendWith(MockitoExtension.class)
-class AbstractPartyControllerTest {
+class AbstractApplicationControllerTest {
     
     @Mock
     private ContextResolver contextResolver;
@@ -57,14 +57,14 @@ class AbstractPartyControllerTest {
     @Mock
     private ServerWebExchange exchange;
     
-    private TestPartyController controller;
+    private TestApplicationController controller;
     
     private UUID testPartyId;
     private UUID testTenantId;
     
     @BeforeEach
     void setUp() {
-        controller = new TestPartyController();
+        controller = new TestApplicationController();
         ReflectionTestUtils.setField(controller, "contextResolver", contextResolver);
         ReflectionTestUtils.setField(controller, "configResolver", configResolver);
         
@@ -73,13 +73,13 @@ class AbstractPartyControllerTest {
     }
     
     @Test
-    void shouldResolvePartyOnlyContext() {
+    void shouldResolveApplicationLayerContext() {
         // Given
         AppContext appContext = AppContext.builder()
                 .partyId(testPartyId)
                 .tenantId(testTenantId)
-                .contractId(null)  // No contract for party-only
-                .productId(null)   // No product for party-only
+                .contractId(null)  // No contract for application-layer
+                .productId(null)   // No product for application-layer
                 .roles(Set.of("customer:onboard"))
                 .permissions(Set.of())
                 .build();
@@ -189,9 +189,9 @@ class AbstractPartyControllerTest {
     }
     
     /**
-     * Concrete test implementation of AbstractPartyController.
+     * Concrete test implementation of AbstractApplicationController.
      */
-    private static class TestPartyController extends AbstractPartyController {
-        // Test implementation - inherits all functionality from AbstractPartyController
+    private static class TestApplicationController extends AbstractApplicationController {
+        // Test implementation - inherits all functionality from AbstractApplicationController
     }
 }
