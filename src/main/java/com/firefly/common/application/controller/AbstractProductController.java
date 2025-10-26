@@ -16,24 +16,42 @@
 
 package com.firefly.common.application.controller;
 
+import com.firefly.common.application.context.ApplicationExecutionContext;
+import com.firefly.common.application.resolver.ContextResolver;
+import com.firefly.common.application.resolver.ConfigResolver;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
 
 import java.util.UUID;
 
 /**
  * <h1>Abstract Base Controller for Product-Scoped Endpoints</h1>
  * 
- * <p>This <strong>optional</strong> base class helps you build controllers that follow Firefly's
- * hierarchical contract + product scoping pattern. It provides utility methods for validation
- * and logging, making it easier to work with nested resources.</p>
+ * <p>This base class is for controllers that operate on <strong>product-scoped resources</strong>
+ * within a contract. It automatically resolves the full application context including party, 
+ * tenant, contract, and product.</p>
  * 
  * <h2>When to Use</h2>
- * <p>Extend this class when building REST endpoints that operate on resources scoped to a
- * <strong>product within a contract</strong>. Your endpoints should follow this path pattern:</p>
- * <pre>
- * /api/v1/contracts/{contractId}/products/{productId}/...
- * </pre>
+ * <p>Extend this class when building REST endpoints that operate on product-level resources:</p>
+ * <ul>
+ *   <li><strong>Transactions:</strong> {@code /contracts/{contractId}/products/{productId}/transactions}</li>
+ *   <li><strong>Balances:</strong> {@code /contracts/{contractId}/products/{productId}/balances}</li>
+ *   <li><strong>Cards:</strong> {@code /contracts/{contractId}/products/{productId}/cards}</li>
+ *   <li><strong>Limits:</strong> {@code /contracts/{contractId}/products/{productId}/limits}</li>
+ * </ul>
+ * 
+ * <h2>Architecture</h2>
+ * <p>This controller automatically resolves:</p>
+ * <ul>
+ *   <li><strong>Party ID:</strong> From Istio header <code>X-Party-Id</code></li>
+ *   <li><strong>Tenant ID:</strong> From Istio header <code>X-Tenant-Id</code></li>
+ *   <li><strong>Contract ID:</strong> From {@code @PathVariable UUID contractId} in your endpoint</li>
+ *   <li><strong>Product ID:</strong> From {@code @PathVariable UUID productId} in your endpoint</li>
+ *   <li><strong>Roles/Permissions:</strong> Enriched from platform SDKs based on party+contract+product</li>
+ *   <li><strong>Tenant Config:</strong> Loaded from configuration service</li>
+ * </ul>
  * 
  * <h2>Quick Example</h2>
  * <pre>
@@ -46,15 +64,15 @@ import java.util.UUID;
  *     private TransactionApplicationService transactionService;
  *     
  *     @GetMapping
- *     @Secure(roles = "TRANSACTION_VIEWER")
+ *     @Secure(requireParty = true, requireContract = true, requireProduct = true, requireRole = "transaction:viewer")
  *     public Mono<List<TransactionDto>> listTransactions(
  *             @PathVariable UUID contractId,
  *             @PathVariable UUID productId,
  *             ServerWebExchange exchange) {
- *         // Validate both IDs are present
- *         requireContext(contractId, productId);
  *         
- *         return transactionService.listTransactions(exchange, contractId, productId);
+ *         // Automatically resolved context with party + tenant + contract + product
+ *         return resolveExecutionContext(exchange, contractId, productId)
+ *             .flatMap(context -> transactionService.listTransactions(context));
  *     }
  * }
  * }
@@ -62,26 +80,69 @@ import java.util.UUID;
  * 
  * <h2>What You Get</h2>
  * <ul>
- *   <li><strong>Context Validation:</strong> {@link #requireContext(UUID, UUID)} validates both IDs</li>
- *   <li><strong>Individual Validation:</strong> {@link #requireContractId(UUID)} and {@link #requireProductId(UUID)}</li>
- *   <li><strong>Logging:</strong> {@link #logOperation(UUID, UUID, String)} for consistent debug logs</li>
- *   <li><strong>Hierarchy Clarity:</strong> Makes contract-product relationship explicit</li>
- * </ul>
- * 
- * <h2>Important Notes</h2>
- * <ul>
- *   <li>This class is <strong>completely optional</strong> - use it only if it helps</li>
- *   <li>It does NOT enforce URL patterns - that's your responsibility</li>
- *   <li>It only provides helper methods for common validation tasks</li>
- *   <li>You can create your own base controller with your own helpers</li>
+ *   <li><strong>Automatic Context Resolution:</strong> {@link #resolveExecutionContext(ServerWebExchange, UUID, UUID)}</li>
+ *   <li><strong>Party + Tenant + Contract + Product:</strong> Full context with complete hierarchy</li>
+ *   <li><strong>Validation:</strong> {@link #requireContext(UUID, UUID)} ensures both IDs are not null</li>
+ *   <li><strong>Full Config Access:</strong> Tenant configuration, feature flags, providers</li>
+ *   <li><strong>Security Ready:</strong> Works seamlessly with {@code @Secure} annotations</li>
  * </ul>
  * 
  * @author Firefly Development Team
  * @since 1.0.0
+ * @see AbstractPartyController For party-only endpoints
  * @see AbstractContractController For contract-only scoped endpoints
  */
 @Slf4j
 public abstract class AbstractProductController {
+    
+    @Autowired
+    private ContextResolver contextResolver;
+    
+    @Autowired
+    private ConfigResolver configResolver;
+    
+    /**
+     * Resolves the full application execution context for product-scoped endpoints.
+     * 
+     * <p>This method:</p>
+     * <ol>
+     *   <li>Validates contractId and productId are not null</li>
+     *   <li>Extracts party ID and tenant ID from Istio headers</li>
+     *   <li>Uses the provided contractId and productId from {@code @PathVariable}</li>
+     *   <li>Enriches with roles and permissions from platform SDKs (party+contract+product scope)</li>
+     *   <li>Loads tenant configuration</li>
+     *   <li>Returns complete {@link ApplicationExecutionContext}</li>
+     * </ol>
+     * 
+     * @param exchange the server web exchange
+     * @param contractId the contract ID from {@code @PathVariable}
+     * @param productId the product ID from {@code @PathVariable}
+     * @return Mono of ApplicationExecutionContext with party, tenant, contract, and product context
+     * @throws IllegalArgumentException if contractId or productId is null
+     */
+    protected Mono<ApplicationExecutionContext> resolveExecutionContext(
+            ServerWebExchange exchange, UUID contractId, UUID productId) {
+        
+        requireContext(contractId, productId);
+        log.debug("Resolving product-scoped execution context for contract: {}, product: {}", 
+                contractId, productId);
+        
+        // Pass both contractId and productId explicitly
+        return contextResolver.resolveContext(exchange, contractId, productId)
+                .flatMap(appContext -> {
+                    log.debug("Resolved product context: party={}, tenant={}, contract={}, product={}", 
+                            appContext.getPartyId(), appContext.getTenantId(), 
+                            appContext.getContractId(), appContext.getProductId());
+                    
+                    return configResolver.resolveConfig(appContext.getTenantId())
+                            .map(appConfig -> ApplicationExecutionContext.builder()
+                                    .context(appContext)
+                                    .config(appConfig)
+                                    .build());
+                })
+                .doOnSuccess(ctx -> log.debug("Successfully resolved product-scoped execution context"))
+                .doOnError(error -> log.error("Failed to resolve product-scoped execution context", error));
+    }
     
     /**
      * Validates that both contractId and productId are not null.

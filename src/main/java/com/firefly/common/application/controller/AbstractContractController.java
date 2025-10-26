@@ -16,24 +16,40 @@
 
 package com.firefly.common.application.controller;
 
+import com.firefly.common.application.context.ApplicationExecutionContext;
+import com.firefly.common.application.resolver.ContextResolver;
+import com.firefly.common.application.resolver.ConfigResolver;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
 
 import java.util.UUID;
 
 /**
  * <h1>Abstract Base Controller for Contract-Scoped Endpoints</h1>
  * 
- * <p>This <strong>optional</strong> base class helps you build controllers that follow Firefly's
- * contract-scoping pattern. It provides utility methods for validation and logging,
- * making it easier to maintain consistent API design across microservices.</p>
+ * <p>This base class is for controllers that operate on <strong>contract-scoped resources</strong>.
+ * It automatically resolves the full application context including party, tenant, and contract.</p>
  * 
  * <h2>When to Use</h2>
- * <p>Extend this class when building REST endpoints that operate on resources scoped to a
- * <strong>contract</strong>. Your endpoints should follow this path pattern:</p>
- * <pre>
- * /api/v1/contracts/{contractId}/...
- * </pre>
+ * <p>Extend this class when building REST endpoints that operate on contract-level resources:</p>
+ * <ul>
+ *   <li><strong>Accounts:</strong> {@code /contracts/{contractId}/accounts}</li>
+ *   <li><strong>Beneficiaries:</strong> {@code /contracts/{contractId}/beneficiaries}</li>
+ *   <li><strong>Statements:</strong> {@code /contracts/{contractId}/statements}</li>
+ *   <li><strong>Settings:</strong> {@code /contracts/{contractId}/settings}</li>
+ * </ul>
+ * 
+ * <h2>Architecture</h2>
+ * <p>This controller automatically resolves:</p>
+ * <ul>
+ *   <li><strong>Party ID:</strong> From Istio header <code>X-Party-Id</code></li>
+ *   <li><strong>Tenant ID:</strong> From Istio header <code>X-Tenant-Id</code></li>
+ *   <li><strong>Contract ID:</strong> From {@code @PathVariable UUID contractId} in your endpoint</li>
+ *   <li><strong>Roles/Permissions:</strong> Enriched from platform SDKs based on party+contract</li>
+ *   <li><strong>Tenant Config:</strong> Loaded from configuration service</li>
+ * </ul>
  * 
  * <h2>Quick Example</h2>
  * <pre>
@@ -46,14 +62,14 @@ import java.util.UUID;
  *     private AccountApplicationService accountService;
  *     
  *     @GetMapping
- *     @Secure(roles = "ACCOUNT_VIEWER")
+ *     @Secure(requireParty = true, requireContract = true, requireRole = "account:viewer")
  *     public Mono<List<AccountDto>> listAccounts(
  *             @PathVariable UUID contractId,
  *             ServerWebExchange exchange) {
- *         // Validate contractId is present
- *         requireContractId(contractId);
  *         
- *         return accountService.listAccountsByContract(exchange, contractId);
+ *         // Automatically resolved context with party + tenant + contract
+ *         return resolveExecutionContext(exchange, contractId)
+ *             .flatMap(context -> accountService.listAccounts(context));
  *     }
  * }
  * }
@@ -61,45 +77,74 @@ import java.util.UUID;
  * 
  * <h2>What You Get</h2>
  * <ul>
+ *   <li><strong>Automatic Context Resolution:</strong> {@link #resolveExecutionContext(ServerWebExchange, UUID)}</li>
+ *   <li><strong>Party + Tenant + Contract:</strong> Full context with roles/permissions for the contract</li>
  *   <li><strong>Validation:</strong> {@link #requireContractId(UUID)} ensures contractId is not null</li>
- *   <li><strong>Logging:</strong> {@link #logOperation(UUID, String)} for consistent debug logs</li>
- *   <li><strong>Clarity:</strong> Makes contract-scoping explicit in your controller hierarchy</li>
- * </ul>
- * 
- * <h2>Important Notes</h2>
- * <ul>
- *   <li>This class is <strong>completely optional</strong> - use it only if it helps</li>
- *   <li>It does NOT enforce URL patterns - that's your responsibility</li>
- *   <li>It only provides helper methods for common tasks</li>
- *   <li>You can create your own base controller with your own helpers</li>
+ *   <li><strong>Full Config Access:</strong> Tenant configuration, feature flags, providers</li>
+ *   <li><strong>Security Ready:</strong> Works seamlessly with {@code @Secure} annotations</li>
  * </ul>
  * 
  * @author Firefly Development Team
  * @since 1.0.0
+ * @see AbstractPartyController For party-only endpoints
  * @see AbstractProductController For product-scoped endpoints
  */
 @Slf4j
 public abstract class AbstractContractController {
     
+    @Autowired
+    private ContextResolver contextResolver;
+    
+    @Autowired
+    private ConfigResolver configResolver;
+    
+    /**
+     * Resolves the full application execution context for contract-scoped endpoints.
+     * 
+     * <p>This method:</p>
+     * <ol>
+     *   <li>Validates contractId is not null</li>
+     *   <li>Extracts party ID and tenant ID from Istio headers</li>
+     *   <li>Uses the provided contractId from {@code @PathVariable}</li>
+     *   <li>Enriches with roles and permissions from platform SDKs (party+contract scope)</li>
+     *   <li>Loads tenant configuration</li>
+     *   <li>Returns complete {@link ApplicationExecutionContext}</li>
+     * </ol>
+     * 
+     * <p><strong>Note:</strong> Product ID will be <code>null</code> since this is contract-only.</p>
+     * 
+     * @param exchange the server web exchange
+     * @param contractId the contract ID from {@code @PathVariable}
+     * @return Mono of ApplicationExecutionContext with party, tenant, and contract context
+     * @throws IllegalArgumentException if contractId is null
+     */
+    protected Mono<ApplicationExecutionContext> resolveExecutionContext(
+            ServerWebExchange exchange, UUID contractId) {
+        
+        requireContractId(contractId);
+        log.debug("Resolving contract-scoped execution context for contract: {}", contractId);
+        
+        // Pass contractId explicitly, productId is null for contract-only endpoints
+        return contextResolver.resolveContext(exchange, contractId, null)
+                .flatMap(appContext -> {
+                    log.debug("Resolved contract context: party={}, tenant={}, contract={}", 
+                            appContext.getPartyId(), appContext.getTenantId(), appContext.getContractId());
+                    
+                    return configResolver.resolveConfig(appContext.getTenantId())
+                            .map(appConfig -> ApplicationExecutionContext.builder()
+                                    .context(appContext)
+                                    .config(appConfig)
+                                    .build());
+                })
+                .doOnSuccess(ctx -> log.debug("Successfully resolved contract-scoped execution context"))
+                .doOnError(error -> log.error("Failed to resolve contract-scoped execution context", error));
+    }
+    
     /**
      * Validates that contractId is not null.
      * 
-     * <p>Call this method at the beginning of your endpoint handlers to ensure
-     * the contractId path variable is present. This is a simple null check that
-     * throws an exception if the contractId is missing.</p>
-     * 
-     * <p><strong>Example:</strong></p>
-     * <pre>
-     * {@code
-     * @GetMapping
-     * public Mono<AccountDto> getAccount(
-     *         @PathVariable UUID contractId,
- *         @PathVariable UUID accountId) {
-     *     requireContractId(contractId);  // Validates contractId is present
-     *     // ... rest of your logic
-     * }
-     * }
-     * </pre>
+     * <p>Call this method to validate the contractId before using it.
+     * This is automatically called by {@link #resolveExecutionContext(ServerWebExchange, UUID)}.</p>
      * 
      * @param contractId the contract ID from the path variable
      * @throws IllegalArgumentException if contractId is null
@@ -117,25 +162,8 @@ public abstract class AbstractContractController {
     /**
      * Logs the current operation with contract context.
      * 
-     * <p>This is a convenience method for adding consistent, structured logging
-     * to your endpoints. It logs at INFO level with the contract ID and operation name.</p>
-     * 
-     * <p><strong>Example:</strong></p>
-     * <pre>
-     * {@code
-     * @PostMapping
-     * public Mono<AccountDto> createAccount(
-     *         @PathVariable UUID contractId,
-     *         @RequestBody CreateAccountRequest request) {
-     *     requireContractId(contractId);
-     *     logOperation(contractId, "createAccount");
-     *     // ... rest of your logic
-     * }
-     * }
-     * </pre>
-     * 
      * @param contractId the contract ID
-     * @param operation a short description of the operation (e.g., "createAccount", "deleteCard")
+     * @param operation a short description of the operation (e.g., "listAccounts", "createBeneficiary")
      */
     protected final void logOperation(UUID contractId, String operation) {
         log.info("[Contract: {}] Operation: {}", contractId, operation);
