@@ -16,7 +16,15 @@
 
 package com.firefly.common.application.security;
 
+import com.firefly.common.application.context.AppContext;
+import com.firefly.common.application.context.AppSecurityContext;
+import com.firefly.common.application.util.SessionContextMapper;
+import com.firefly.security.center.session.FireflySessionManager;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
 
 /**
  * Default implementation of SecurityAuthorizationService.
@@ -59,50 +67,97 @@ import org.springframework.stereotype.Service;
  * @since 1.0.0
  */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class DefaultSecurityAuthorizationService extends AbstractSecurityAuthorizationService {
     
-    // TODO: Inject SecurityCenter SDK client when available
-    // private final SecurityCenterClient securityCenterClient;
+    @Autowired(required = false)
+    private final FireflySessionManager sessionManager;
     
     // The parent AbstractSecurityAuthorizationService already provides:
     // - Role checking (hasRole, hasAnyRole, hasAllRoles)
     // - Permission checking (hasPermission, hasAnyPermission, hasAllPermissions)
     // - Authorization with requireAll/requireAny semantics
     
-    // If SecurityCenter integration is needed, uncomment and implement:
-    /*
+    /**
+     * Enhanced authorization using FireflySessionManager for product access validation.
+     * 
+     * <p>This method integrates with the Security Center's FireflySessionManager to:</p>
+     * <ul>
+     *   <li>Validate party has access to specific products/contracts</li>
+     *   <li>Check granular permissions (action + resource)</li>
+     *   <li>Provide graceful degradation if SecurityCenter is unavailable</li>
+     * </ul>
+     */
     @Override
     protected Mono<AppSecurityContext> authorizeWithSecurityCenter(
             AppContext context, 
             AppSecurityContext securityContext) {
         
-        log.debug("Delegating authorization to SecurityCenter for party: {}, endpoint: {}",
-                context.getPartyId(), securityContext.getEndpoint());
+        if (sessionManager == null) {
+            log.warn("FireflySessionManager not available - falling back to basic role/permission checks. " +
+                    "Deploy common-platform-security-center for enhanced authorization.");
+            return super.authorizeWithSecurityCenter(context, securityContext);
+        }
         
-        return securityCenterClient.evaluate(
-                SecurityCenterEvaluationRequest.builder()
-                    .partyId(context.getPartyId())
-                    .tenantId(context.getTenantId())
-                    .contractId(context.getContractId())
-                    .productId(context.getProductId())
-                    .endpoint(securityContext.getEndpoint())
-                    .httpMethod(securityContext.getHttpMethod())
-                    .requiredRoles(securityContext.getRequiredRoles())
-                    .requiredPermissions(securityContext.getRequiredPermissions())
-                    .build()
-            )
-            .map(response -> securityContext.toBuilder()
-                .authorized(response.isGranted())
-                .authorizationFailureReason(response.getReason())
-                .evaluationResult(SecurityEvaluationResult.builder()
-                    .granted(response.isGranted())
-                    .reason(response.getReason())
-                    .evaluatedRule(response.getEvaluatedRule())
-                    .build())
-                .build())
-            .doOnNext(result -> log.info("SecurityCenter decision for party {}: {}", 
-                context.getPartyId(), 
-                result.isAuthorized() ? "GRANTED" : "DENIED"));
+        log.debug("Using FireflySessionManager for authorization: party={}, contract={}, product={}",
+                context.getPartyId(), context.getContractId(), context.getProductId());
+        
+        // If product access needs to be validated
+        if (context.getProductId() != null) {
+            return sessionManager.hasAccessToProduct(context.getPartyId(), context.getProductId())
+                .flatMap(hasAccess -> {
+                    if (!hasAccess) {
+                        log.warn("Party {} does not have access to product {}", 
+                                context.getPartyId(), context.getProductId());
+                        return Mono.just(createUnauthorizedContext(securityContext, 
+                                "No access to requested product"));
+                    }
+                    
+                    // Product access OK - now check role/permission requirements
+                    return performRolePermissionChecks(context, securityContext);
+                })
+                .doOnError(error -> log.error("Error checking product access via FireflySessionManager: {}", 
+                        error.getMessage(), error))
+                .onErrorResume(error -> {
+                    // Graceful degradation on error
+                    log.warn("Falling back to basic checks due to error: {}", error.getMessage());
+                    return performRolePermissionChecks(context, securityContext);
+                });
+        }
+        
+        // No product context - just perform role/permission checks
+        return performRolePermissionChecks(context, securityContext);
     }
-    */
+    
+    /**
+     * Performs standard role and permission checks using the AppContext.
+     */
+    private Mono<AppSecurityContext> performRolePermissionChecks(
+            AppContext context, AppSecurityContext securityContext) {
+        
+        // Check required roles
+        if (securityContext.hasRequiredRoles()) {
+            return checkRoles(context, securityContext)
+                .flatMap(rolesOk -> {
+                    if (!rolesOk) {
+                        return Mono.just(createUnauthorizedContext(securityContext, 
+                                "Required roles not present"));
+                    }
+                    // Roles OK - check permissions if needed
+                    if (securityContext.hasRequiredPermissions()) {
+                        return checkPermissions(context, securityContext);
+                    }
+                    return Mono.just(createAuthorizedContext(securityContext));
+                });
+        }
+        
+        // Check permissions
+        if (securityContext.hasRequiredPermissions()) {
+            return checkPermissions(context, securityContext);
+        }
+        
+        // No specific requirements - grant access
+        return Mono.just(createAuthorizedContext(securityContext));
+    }
 }
