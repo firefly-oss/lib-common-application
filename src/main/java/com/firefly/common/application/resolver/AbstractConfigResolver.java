@@ -20,17 +20,18 @@ import com.firefly.common.application.context.AppConfig;
 import com.firefly.common.cache.manager.FireflyCacheManager;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.UUID;
 
 /**
- * Abstract base implementation of ConfigResolver with caching support using FireflyCacheManager.
+ * Abstract base implementation of ConfigResolver with caching support using dedicated config cache.
  * Integrates with common-platform-config-mgmt-sdk to fetch tenant configuration.
  * 
- * <p>This implementation uses FireflyCacheManager from lib-common-cache for distributed
- * caching support with TTL and proper eviction policies.</p>
+ * <p>This implementation uses a dedicated configCacheManager from ConfigCacheAutoConfiguration
+ * to avoid cache key collisions with other application caches.</p>
  * 
  * @author Firefly Development Team
  * @since 1.0.0
@@ -42,6 +43,7 @@ public abstract class AbstractConfigResolver implements ConfigResolver {
     private static final Duration DEFAULT_CONFIG_TTL = Duration.ofHours(1);
     
     @Autowired(required = false)
+    @Qualifier("configCacheManager")
     private FireflyCacheManager cacheManager;
     
     @Override

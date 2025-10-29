@@ -1,1 +1,1 @@
-com.firefly.common.application.config.ApplicationLayerAutoConfiguration
+com.firefly.common.application.config.ConfigCacheAutoConfiguration
