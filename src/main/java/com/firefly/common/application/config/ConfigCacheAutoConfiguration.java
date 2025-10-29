@@ -74,10 +74,10 @@ public class ConfigCacheAutoConfiguration {
                 CONFIG_CACHE_TTL.toHours()
         );
 
-        // Prefer Redis for distributed configuration management
+        // Use AUTO to select the best available provider (Redis, Hazelcast, JCache, or Caffeine)
         return factory.createCacheManager(
                 "app-config",
-                CacheType.REDIS,
+                CacheType.AUTO,
                 CONFIG_CACHE_KEY_PREFIX,
                 CONFIG_CACHE_TTL,
                 description,
