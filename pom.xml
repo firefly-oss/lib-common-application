@@ -105,30 +105,10 @@
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
 
-        <!-- Firefly Common Libraries -->
-        <dependency>
-            <groupId>com.firefly</groupId>
-            <artifactId>lib-common-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.firefly</groupId>
-            <artifactId>lib-common-domain</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.firefly</groupId>
-            <artifactId>lib-common-data</artifactId>
-            <version>${project.version}</version>
-            <optional>true</optional>
-        </dependency>
-
         <!-- Security Center Session Module -->
         <dependency>
             <groupId>com.firefly</groupId>
-            <artifactId>common-platform-security-center-session</artifactId>
+            <artifactId>core-domain-security-center-session</artifactId>
             <version>${project.version}</version>
         </dependency>
 
@@ -156,23 +136,11 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- Firefly Platform SDK Dependencies -->
+        <!-- Spring Cloud Gateway for dynamic routing via annotations -->
         <dependency>
-            <groupId>com.firefly</groupId>
-            <artifactId>common-platform-customer-mgmt-sdk</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.firefly</groupId>
-            <artifactId>common-platform-contract-mgmt-sdk</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>com.firefly</groupId>
-            <artifactId>common-platform-config-mgmt-sdk</artifactId>
-            <version>${project.version}</version>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-gateway</artifactId>
+            <optional>true</optional>
         </dependency>
 
         <!-- Resilience4j for resiliency patterns -->
