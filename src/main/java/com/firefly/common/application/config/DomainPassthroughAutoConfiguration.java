@@ -17,6 +17,7 @@
 package com.firefly.common.application.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -24,10 +25,11 @@ import org.springframework.cloud.gateway.route.RouteLocator;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
-import org.springframework.aop.support.AopUtils;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Auto-configuration that scans beans annotated with {@link DomainPassthrough}
@@ -44,38 +46,47 @@ public class DomainPassthroughAutoConfiguration {
     @Bean
     public RouteLocator domainPassthroughRoutes(RouteLocatorBuilder builder) {
         var routes = builder.routes();
+        var env = context.getEnvironment();
 
         // Collect beans annotated with single or container annotation
         Map<String, Object> beans = new LinkedHashMap<>();
         beans.putAll(context.getBeansWithAnnotation(DomainPassthrough.class));
         beans.putAll(context.getBeansWithAnnotation(DomainPassthroughs.class));
 
-        var detectedRoutes = new java.util.ArrayList<String>();
+        var detectedRoutes = new ArrayList<String>();
 
         beans.forEach((name, bean) -> {
             Class<?> targetClass = AopUtils.getTargetClass(bean);
             DomainPassthrough[] annotations = targetClass.getAnnotationsByType(DomainPassthrough.class);
             for (int i = 0; i < annotations.length; i++) {
                 var ann = annotations[i];
+
+                // Resolve placeholders (${...})
+                String resolvedPath = env.resolvePlaceholders(ann.path());
+                String resolvedTarget = env.resolvePlaceholders(ann.target());
+
                 String routeId = ann.routeId().isEmpty()
                         ? name + "-passthrough" + (annotations.length > 1 ? "-" + (i + 1) : "")
                         : ann.routeId();
 
                 routes.route(routeId, r -> r
-                        .path(ann.path())
-                        .uri(ann.target()));
+                        .path(resolvedPath)
+                        .uri(resolvedTarget));
 
-                detectedRoutes.add(String.format("id=%s, bean=%s, path=%s, target=%s",
-                        routeId, name, ann.path(), ann.target()));
+                detectedRoutes.add(String.format(
+                        "id=%s, bean=%s, path=%s, target=%s",
+                        routeId, name, resolvedPath, resolvedTarget));
             }
         });
 
         if (detectedRoutes.isEmpty()) {
             log.info("DomainPassthrough: no routes detected.");
         } else {
-            var sb = new StringBuilder();
-            detectedRoutes.forEach(r -> sb.append(" - ").append(r).append(System.lineSeparator()));
-            log.info("DomainPassthrough: {} routes detected:\n{}", detectedRoutes.size(), sb);
+            log.info("DomainPassthrough: {} routes detected:\n{}",
+                    detectedRoutes.size(),
+                    detectedRoutes.stream()
+                            .map(r -> " - " + r)
+                            .collect(Collectors.joining(System.lineSeparator())));
         }
 
         return routes.build();
